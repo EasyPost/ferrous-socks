@@ -1,0 +1,2 @@
+bind-address = "[::]:8080"
+disallow-private = true

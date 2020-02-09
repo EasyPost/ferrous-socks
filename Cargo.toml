@@ -1,0 +1,18 @@
+[package]
+name = "ferrous-socks"
+version = "0.1.0"
+authors = ["James Brown <roguelazer@roguelazer.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+tokio = { version = "0.2", features = ["full"] }
+futures = "0.3"
+derive_more = "*"
+byteorder = "1"
+log = "0.4"
+clap = "2"
+toml = "0.5"
+serde = "1"
+serde_derive = "1"

@@ -1,9 +1,11 @@
 use std::fs::File;
 use std::path::Path;
 use std::io::Read;
+use std::net::IpAddr;
 
 use derive_more::Display;
 use serde_derive::Deserialize;
+use ip_network::IpNetwork;
 
 
 #[derive(Debug, Display)]
@@ -35,12 +37,24 @@ fn _false() -> bool {
     false
 }
 
+#[derive(Debug, PartialEq, Eq, Deserialize)]
+pub(crate) enum AclAction {
+    Allow,
+    Reject
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AclItem {
+    pub action: AclAction,
+    pub destination_network: Option<IpNetwork>,
+    pub destination_port: Option<u16>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct Config {
     #[serde(alias = "bind-address")]
     pub bind_address: String,
-    #[serde(alias="disallow-private", default="_false")]
-    pub disallow_private: bool
+    pub acl: Vec<AclItem>,
 }
 
 
@@ -51,5 +65,16 @@ impl Config {
         f.read_to_string(&mut contents)?;
         let config = toml::from_str(contents.as_str())?;
         Ok(config)
+    }
+
+    pub fn is_permitted(&self, ip: IpAddr, dport: u16) -> bool {
+        for rule in self.acl.iter() {
+            let ip_match = rule.destination_network.map(|i| i.contains(ip)).unwrap_or(true);
+            let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
+            if ip_match && port_match {
+                return rule.action == AclAction::Allow;
+            }
+        }
+        true
     }
 }

@@ -1,2 +1,12 @@
-bind-address = "[::]:8080"
+bind-address = "[::1]:8080"
+acl = [
+    {destination_network = "192.168.0.0/16", action="Reject"},
+    {destination_network = "172.16.0.0/12", action="Reject"},
+    {destination_network = "10.0.0.0/8", action="Reject"},
+    {destination_network = "fc00::/7", action="Reject"},
+    {destination_network = "fe80::/10", action="Reject"},
+    {destination_network = "127.0.0.0/8", action="Reject"},
+    {destination_network = "::1/128", action="Reject"},
+    {action="Allow"},
+]
 disallow-private = true

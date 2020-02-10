@@ -8,12 +8,14 @@ use byteorder::{NetworkEndian, ByteOrder};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 use derive_more::Display;
-use log::{info, warn, error};
+use log::{debug, info, warn, error};
 use clap::{self, Arg};
 
 mod proxy;
 mod config;
 mod stats;
+
+use config::Config;
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error> {
     let mut init_buf = [0u8; 2];
@@ -38,7 +40,7 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum Address {
     IpAddr(IpAddr),
     DomainName(String)
@@ -51,13 +53,21 @@ struct Request {
 }
 
 impl Request {
-    async fn connect(self, allow_private: bool) -> Result<Option<TcpStream>, tokio::io::Error> {
+    async fn connect(self, config: &Config) -> Result<Option<TcpStream>, tokio::io::Error> {
         let conn = match self.address {
-            Address::IpAddr(i) => Some(TcpStream::connect((i, self.dport)).await?),
+            Address::IpAddr(i) => {
+                if config.is_permitted(i, self.dport) {
+                    Some(TcpStream::connect((i, self.dport)).await?)
+                } else {
+                    None
+                }
+            }
             Address::DomainName(d) => {
                 for addr in tokio::net::lookup_host(d.as_str()).await? {
                     let addr = SocketAddr::new(addr.ip(), self.dport);
-                    return Ok(Some(TcpStream::connect(addr).await?));
+                    if config.is_permitted(addr.ip(), self.dport) {
+                        return Ok(Some(TcpStream::connect(addr).await?));
+                    }
                 }
                 None
             }
@@ -113,7 +123,16 @@ impl Reply {
     }
 }
 
-async fn read_request(socket: &mut TcpStream, address: SocketAddr) -> Result<Option<Request>, RequestError> {
+async fn copy_then_shutdown<S, D>(src: &mut S, dest: &mut D) -> Result<(), tokio::io::Error>
+    where S: AsyncRead + Unpin,
+          D: AsRef<TcpStream> + AsyncWrite + Unpin
+{
+    tokio::io::copy(src, dest).await?;
+    dest.as_ref().shutdown(std::net::Shutdown::Write)?;
+    Ok(())
+}
+
+async fn read_request(socket: &mut TcpStream) -> Result<Option<Request>, RequestError> {
     let mut fixed_buf = [0u8; 4];
     socket.read_exact(&mut fixed_buf).await?;
     let ver = fixed_buf[0];
@@ -155,34 +174,40 @@ async fn read_request(socket: &mut TcpStream, address: SocketAddr) -> Result<Opt
     }))
 }
 
-async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<config::Config>) -> Result<bool, Box<dyn Error>> {
+async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<Config>, conn_id: u64) -> Result<bool, Box<dyn Error>> {
+    debug!("{}: accepted connection from {:?}", conn_id, address);
     if ! handshake_auth(&mut socket).await? {
+        debug!("{}: handshake failed", conn_id);
         return Ok(false);
     }
-    let request = read_request(&mut socket, address).await?;
+    debug!("{}: handshake succeeded", conn_id);
+    let request = read_request(&mut socket).await?;
     if let Some(request) = request {
+        let ip = request.address.clone();
         let mut conn = match tokio::time::timeout(
                 Duration::from_millis(3000),
-                request.connect(!config.disallow_private)
+                request.connect(&config)
             ).await {
             Ok(c) => match c {
                 Ok(Some(c)) => c,
                 Ok(None) => {
+                    warn!("{}: denying connection to {:?}", conn_id, ip);
                     Reply::ConnectionNotAllowed.write_error(&mut socket).await?;
                     return Ok(false);
                 },
-                Err(e) => {
+                Err(_) => {
                     Reply::NetworkUnreachable.write_error(&mut socket).await?;
                     return Ok(false);
                 }
             }
             Err(e) => {
-                warn!("timeout connecting: {:?}", e);
+                warn!("{}: timeout connecting: {:?}", conn_id, e);
                 Reply::TtlExpired.write_error(&mut socket).await?;
                 return Ok(false);
             }
         };
         let local_end = conn.local_addr()?;
+        debug!("{}: connected to {:?}", conn_id, local_end);
         socket.write_all(&[0x05, 0x00, 0x01, match local_end {
             SocketAddr::V4(_) => 0x01,
             SocketAddr::V6(_) => 0x04
@@ -197,8 +222,8 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
         let (mut conn_r, mut conn_w) = conn.split();
         let (mut socket_r,  mut socket_w) = socket.split();
         let (first, second) = tokio::join!(
-            tokio::io::copy(&mut conn_r, &mut socket_w),
-            tokio::io::copy(&mut socket_r, &mut conn_w)
+            copy_then_shutdown(&mut conn_r, &mut socket_w),
+            copy_then_shutdown(&mut socket_r, &mut conn_w)
         );
         first?;
         second?;
@@ -208,12 +233,14 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
     }
 }
 
-async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr, config: Arc<config::Config>, stats: Arc<stats::Stats>) {
-    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config)).await {
+async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr, config: Arc<Config>, stats: Arc<stats::Stats>) {
+    let conn_id = stats.start_request();
+    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config, conn_id)).await {
         Ok(Ok(_)) => (),
-        Ok(Err(e)) => error!("error handling session: {:?}", e),
-        Err(_) => eprintln!("session timed out!"),
+        Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
+        Err(_) => eprintln!("session {} timed out!", conn_id),
     }
+    stats.finish_request(conn_id);
 }
 
 
@@ -232,7 +259,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                      .required(true))
                             .get_matches();
 
-    let conf = Arc::new(config::Config::from_path(matches.value_of("config").unwrap())?);
+    env_logger::init();
+
+    let conf = Arc::new(Config::from_path(matches.value_of("config").unwrap())?);
 
     let stats = Arc::new(stats::Stats::new());
 

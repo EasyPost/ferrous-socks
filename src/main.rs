@@ -2,6 +2,7 @@ use std::error::Error;
 use std::env;
 use std::net::{SocketAddr, IpAddr};
 use std::time::Duration;
+use std::sync::Arc;
 
 use byteorder::{NetworkEndian, ByteOrder};
 use tokio::net::{TcpListener, TcpStream};
@@ -12,6 +13,7 @@ use clap::{self, Arg};
 
 mod proxy;
 mod config;
+mod stats;
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error> {
     let mut init_buf = [0u8; 2];
@@ -49,10 +51,16 @@ struct Request {
 }
 
 impl Request {
-    async fn connect(self) -> Result<TcpStream, tokio::io::Error> {
+    async fn connect(self, allow_private: bool) -> Result<Option<TcpStream>, tokio::io::Error> {
         let conn = match self.address {
-            Address::IpAddr(i) => TcpStream::connect((i, self.dport)).await?,
-            Address::DomainName(d) => TcpStream::connect((d.as_str(), self.dport)).await?,
+            Address::IpAddr(i) => Some(TcpStream::connect((i, self.dport)).await?),
+            Address::DomainName(d) => {
+                for addr in tokio::net::lookup_host(d.as_str()).await? {
+                    let addr = SocketAddr::new(addr.ip(), self.dport);
+                    return Ok(Some(TcpStream::connect(addr).await?));
+                }
+                None
+            }
         };
         Ok(conn)
     }
@@ -147,7 +155,7 @@ async fn read_request(socket: &mut TcpStream, address: SocketAddr) -> Result<Opt
     }))
 }
 
-async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr) -> Result<bool, Box<dyn Error>> {
+async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<config::Config>) -> Result<bool, Box<dyn Error>> {
     if ! handshake_auth(&mut socket).await? {
         return Ok(false);
     }
@@ -155,10 +163,14 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr) -> Re
     if let Some(request) = request {
         let mut conn = match tokio::time::timeout(
                 Duration::from_millis(3000),
-                request.connect()
+                request.connect(!config.disallow_private)
             ).await {
             Ok(c) => match c {
-                Ok(c) => c,
+                Ok(Some(c)) => c,
+                Ok(None) => {
+                    Reply::ConnectionNotAllowed.write_error(&mut socket).await?;
+                    return Ok(false);
+                },
                 Err(e) => {
                     Reply::NetworkUnreachable.write_error(&mut socket).await?;
                     return Ok(false);
@@ -196,8 +208,8 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr) -> Re
     }
 }
 
-async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr) {
-    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address)).await {
+async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr, config: Arc<config::Config>, stats: Arc<stats::Stats>) {
+    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config)).await {
         Ok(Ok(_)) => (),
         Ok(Err(e)) => error!("error handling session: {:?}", e),
         Err(_) => eprintln!("session timed out!"),
@@ -220,26 +232,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                      .required(true))
                             .get_matches();
 
-    let conf = config::Config::from_path(matches.value_of("config").unwrap())?;
+    let conf = Arc::new(config::Config::from_path(matches.value_of("config").unwrap())?);
 
-    // Next up we create a TCP listener which will listen for incoming
-    // connections. This TCP listener is bound to the address we determined
-    // above and must be associated with an event loop.
+    let stats = Arc::new(stats::Stats::new());
+
     let mut listener = TcpListener::bind(&conf.bind_address).await?;
     info!("Listening on: {}", conf.bind_address);
 
     loop {
-        // Asynchronously wait for an inbound socket.
         let (socket, address) = listener.accept().await?;
 
-        // And this is where much of the magic of this server happens. We
-        // crucially want all clients to make progress concurrently, rather than
-        // blocking one on completion of another. To achieve this we use the
-        // `tokio::spawn` function to execute the work in the background.
-        //
-        // Essentially here we're executing a new task to run concurrently,
-        // which will allow all of our clients to be processed concurrently.
+        let my_config = Arc::clone(&conf);
+        let my_stats = Arc::clone(&stats);
 
-        tokio::spawn(handle_one_connection_wrapper(socket, address));
+        tokio::spawn(handle_one_connection_wrapper(socket, address, my_config, my_stats));
     }
 }

@@ -14,8 +14,10 @@ use clap::{self, Arg};
 mod proxy;
 mod config;
 mod stats;
+mod request;
 
 use config::Config;
+use request::{Address, Request};
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error> {
     let mut init_buf = [0u8; 2];
@@ -37,42 +39,6 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error
     } else {
         socket.write_all(&[05u8, 0xffu8]).await?;
         Ok(false)
-    }
-}
-
-#[derive(Debug, Clone)]
-enum Address {
-    IpAddr(IpAddr),
-    DomainName(String)
-}
-
-#[derive(Debug, Clone)]
-struct Request {
-    address: Address,
-    dport: u16,
-}
-
-impl Request {
-    async fn connect(self, config: &Config) -> Result<Option<TcpStream>, tokio::io::Error> {
-        let conn = match self.address {
-            Address::IpAddr(i) => {
-                if config.is_permitted(i, self.dport) {
-                    Some(TcpStream::connect((i, self.dport)).await?)
-                } else {
-                    None
-                }
-            }
-            Address::DomainName(d) => {
-                for addr in tokio::net::lookup_host(d.as_str()).await? {
-                    let addr = SocketAddr::new(addr.ip(), self.dport);
-                    if config.is_permitted(addr.ip(), self.dport) {
-                        return Ok(Some(TcpStream::connect(addr).await?));
-                    }
-                }
-                None
-            }
-        };
-        Ok(conn)
     }
 }
 
@@ -173,15 +139,19 @@ async fn read_request(socket: &mut TcpStream) -> Result<Option<Request>, Request
     }))
 }
 
-async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<Config>, conn_id: u64) -> Result<bool, Box<dyn Error>> {
+async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<Config>, stats: &stats::Stats, conn_id: u64) -> Result<bool, Box<dyn Error>> {
     debug!("{}: accepted connection from {:?}", conn_id, address);
     if ! handshake_auth(&mut socket).await? {
+        stats.handshake_failed();
         debug!("{}: handshake failed", conn_id);
         return Ok(false);
     }
+    stats.handshake_success();
     debug!("{}: handshake succeeded", conn_id);
     let request = read_request(&mut socket).await?;
     if let Some(request) = request {
+        stats.set_request(conn_id, &request).await;
+        debug!("stats: {:?}", stats);
         let mut conn = match tokio::time::timeout(
                 Duration::from_millis(3000),
                 request.clone().connect(&config)
@@ -232,13 +202,13 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
 }
 
 async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr, config: Arc<Config>, stats: Arc<stats::Stats>) {
-    let conn_id = stats.start_request();
-    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config, conn_id)).await {
+    let conn_id = stats.start_request(address).await;
+    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config, &stats, conn_id)).await {
         Ok(Ok(_)) => (),
         Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
         Err(_) => eprintln!("session {} timed out!", conn_id),
     }
-    stats.finish_request(conn_id);
+    stats.finish_request(conn_id).await;
 }
 
 

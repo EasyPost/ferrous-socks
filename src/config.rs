@@ -9,7 +9,7 @@ use ip_network::IpNetwork;
 
 
 #[derive(Debug, Display)]
-pub(crate) enum ConfigError {
+pub enum ConfigError {
     IoError(std::io::Error),
     DeserializationError(toml::de::Error),
 }
@@ -38,7 +38,7 @@ fn _false() -> bool {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) enum AclAction {
+pub enum AclAction {
     Allow,
     Reject
 }
@@ -59,14 +59,14 @@ impl Default for AclAction {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct AclItem {
+pub struct AclItem {
     pub action: AclAction,
     pub destination_network: Option<IpNetwork>,
     pub destination_port: Option<u16>,
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct Config {
+pub struct Config {
     #[serde(alias = "bind-address")]
     pub bind_address: String,
     pub acl: Vec<AclItem>,

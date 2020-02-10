@@ -15,9 +15,11 @@ mod proxy;
 mod config;
 mod stats;
 mod request;
+mod reply;
 
 use config::Config;
-use request::{Address, Request};
+use request::{Address, Request, Connection};
+use reply::Reply;
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error> {
     let mut init_buf = [0u8; 2];
@@ -54,37 +56,6 @@ impl Error for RequestError { }
 impl From<tokio::io::Error> for RequestError {
     fn from(t: tokio::io::Error) -> Self {
         RequestError::IoError(t)
-    }
-}
-
-#[derive(Debug)]
-enum Reply {
-    SocksFailure,
-    ConnectionNotAllowed,
-    NetworkUnreachable,
-    ConnectionRefused,
-    TtlExpired,
-    CommandNotSupported,
-    AddressNotSupported
-}
-
-impl Reply {
-    fn as_u8(&self) -> u8 {
-        use Reply::*;
-
-        match self {
-            SocksFailure => 0x01,
-            ConnectionNotAllowed => 0x02,
-            NetworkUnreachable => 0x03,
-            ConnectionRefused => 0x04,
-            TtlExpired => 0x05,
-            CommandNotSupported => 0x07,
-            AddressNotSupported => 0x08,
-        }
-    }
-
-    async fn write_error<A: AsyncWrite + Unpin>(&self, into: &mut A) -> Result<(), tokio::io::Error> {
-        into.write_all(&[0x05, self.as_u8(), 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await
     }
 }
 
@@ -153,18 +124,29 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
         stats.set_request(conn_id, &request).await;
         debug!("stats: {:?}", stats);
         let mut conn = match tokio::time::timeout(
-                Duration::from_millis(3000),
+                Duration::from_millis(config.connect_timeout_ms.into()),
                 request.clone().connect(&config)
             ).await {
             Ok(c) => match c {
-                Ok(Some(c)) => c,
-                Ok(None) => {
+                Ok(Connection::Connected(c)) => c,
+                Ok(Connection::ConnectionNotAllowed) => {
                     warn!("{}: denying connection to {:?}", conn_id, request);
                     Reply::ConnectionNotAllowed.write_error(&mut socket).await?;
                     return Ok(false);
                 },
-                Err(_) => {
+                Ok(Connection::AddressNotSupported) => {
+                    warn!("{}: bad address family to to {:?}", conn_id, request);
+                    Reply::AddressNotSupported.write_error(&mut socket).await?;
+                    return Ok(false);
+                }
+                Ok(Connection::SocksFailure) => {
+                    warn!("{}: failure (resolution?) to {:?}", conn_id, request);
+                    Reply::SocksFailure.write_error(&mut socket).await?;
+                    return Ok(false);
+                }
+                Err(e) => {
                     Reply::NetworkUnreachable.write_error(&mut socket).await?;
+                    warn!("error connecting: {:?}", e);
                     return Ok(false);
                 }
             }
@@ -203,11 +185,20 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
 
 async fn handle_one_connection_wrapper(socket: TcpStream, address: SocketAddr, config: Arc<Config>, stats: Arc<stats::Stats>) {
     let conn_id = stats.start_request(address).await;
-    match tokio::time::timeout(Duration::from_secs(300000), handle_one_connection(socket, address, config, &stats, conn_id)).await {
-        Ok(Ok(_)) => (),
-        Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
-        Err(_) => eprintln!("session {} timed out!", conn_id),
+    if let Some(total_timeout_ms) = config.total_timeout_ms {
+        let timeout = Duration::from_millis(total_timeout_ms.into());
+        match tokio::time::timeout(timeout, handle_one_connection(socket, address, config, &stats, conn_id)).await {
+            Ok(Ok(_)) => (),
+            Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
+            Err(_) => eprintln!("session {} timed out!", conn_id),
+        }
+    } else {
+        match handle_one_connection(socket, address, config, &stats, conn_id).await {
+            Ok(_) => (),
+            Err(e) => error!("error handling session {}: {:?}", conn_id, e),
+        }
     }
+    debug!("finishing request");
     stats.finish_request(conn_id).await;
 }
 
@@ -233,8 +224,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let stats = Arc::new(stats::Stats::new());
 
-    let mut listener = TcpListener::bind(&conf.bind_address).await?;
-    info!("Listening on: {}", conf.bind_address);
+    let mut listener = TcpListener::bind(&conf.listen_address).await?;
+    info!("Listening on: {}", conf.listen_address);
 
     loop {
         let (socket, address) = listener.accept().await?;

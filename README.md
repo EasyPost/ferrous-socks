@@ -6,6 +6,7 @@ Features:
  - IPv4 and IPv6 support
  - Server-side DNS resolution
  - ACL functionality
+ - Specifying bind addresses for outgoing IPv4 and IPv6 sessions
 
 Coming soon:
 

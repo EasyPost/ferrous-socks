@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::path::Path;
 use std::io::Read;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use derive_more::Display;
 use serde_derive::Deserialize;
@@ -37,6 +37,17 @@ fn _false() -> bool {
     false
 }
 
+fn _default_bind() -> Vec<IpAddr> {
+    vec![
+        IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
+    ]
+}
+
+fn _default_connect_timeout_ms() -> u32 {
+    3000
+}
+
 #[derive(Debug, Deserialize)]
 pub enum AclAction {
     Allow,
@@ -67,11 +78,17 @@ pub struct AclItem {
 
 #[derive(Debug, Deserialize)]
 pub struct Config {
-    #[serde(alias = "bind-address")]
-    pub bind_address: String,
+    #[serde(alias = "listen-address")]
+    pub listen_address: String,
+    #[serde(alias = "bind-addresses", default="_default_bind")]
+    pub bind_addresses: Vec<IpAddr>,
     pub acl: Vec<AclItem>,
-    #[serde(alias="default-action")]
-    pub default_action: AclAction
+    #[serde(alias="acl-default-action")]
+    pub acl_default_action: AclAction,
+    #[serde(alias = "connect-timeout-ms", default="_default_connect_timeout_ms")]
+    pub connect_timeout_ms: u32,
+    #[serde(alias = "total-timeout-ms")]
+    pub total_timeout_ms: Option<u32>,
 }
 
 
@@ -92,6 +109,6 @@ impl Config {
                 return rule.action.permitted()
             }
         }
-        self.default_action.permitted()
+        self.acl_default_action.permitted()
     }
 }

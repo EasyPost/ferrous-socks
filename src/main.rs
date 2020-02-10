@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::env;
-use std::net::{SocketAddr, IpAddr};
+use std::net::{SocketAddr, IpAddr, Ipv4Addr};
 use std::time::Duration;
 use std::sync::Arc;
 
@@ -14,33 +14,44 @@ use clap::{self, Arg};
 mod proxy;
 mod config;
 mod stats;
+mod stats_socket;
 mod request;
 mod reply;
+mod util;
 
 use config::Config;
-use request::{Address, Request, Connection};
+use request::{Address, Request, Connection, Version};
 use reply::Reply;
 
-async fn handshake_auth(socket: &mut TcpStream) -> Result<bool, tokio::io::Error> {
+enum HandshakeResult {
+    Okay,
+    Failed,
+    Version4([u8; 2]),
+}
+
+async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio::io::Error> {
     let mut init_buf = [0u8; 2];
     socket.read_exact(&mut init_buf).await?;
+    if init_buf[0] == 0x04 {
+        return Ok(HandshakeResult::Version4(init_buf));
+    }
     if init_buf[0] != 0x05 {
         socket.write_all(&[0x05u8, 0xff]).await?;
-        return Ok(false);
+        return Ok(HandshakeResult::Failed);
     }
     let num_auths = init_buf[1];
     if num_auths > 0xfe {
         socket.write_all(&[0x05u8, 0xff]).await?;
-        return Ok(false);
+        return Ok(HandshakeResult::Failed);
     }
     let mut auths = vec![0u8; num_auths as usize];
     socket.read_exact(&mut auths).await?;
     if auths.iter().any(|&i| i == 0u8) {
         socket.write_all(&[0x5u8, 0x00u8]).await?;
-        Ok(true)
+        Ok(HandshakeResult::Okay)
     } else {
         socket.write_all(&[05u8, 0xffu8]).await?;
-        Ok(false)
+        Ok(HandshakeResult::Failed)
     }
 }
 
@@ -68,59 +79,125 @@ async fn copy_then_shutdown<S, D>(src: &mut S, dest: &mut D) -> Result<(), tokio
     Ok(())
 }
 
-async fn read_request(socket: &mut TcpStream) -> Result<Option<Request>, RequestError> {
-    let mut fixed_buf = [0u8; 4];
-    socket.read_exact(&mut fixed_buf).await?;
-    let ver = fixed_buf[0];
-    let cmd = fixed_buf[1];
-    if ver != 0x05 {
-        Reply::SocksFailure.write_error(socket).await?;
-        return Ok(None);
-    }
-    if cmd != 0x01 {
-        Reply::CommandNotSupported.write_error(socket).await?;
-        return Ok(None);
-    }
-    let address = match fixed_buf[3] {
-        0x01 => {
-            let mut buf = [0u8; 4];
-            socket.read_exact(&mut buf).await?;
-            Address::IpAddr(IpAddr::V4(buf.into()))
-        },
-        0x03 => {
-            let mut len_buf = [0u8; 1];
-            socket.read_exact(&mut len_buf).await?;
-            let mut name = vec![0u8; len_buf[0] as usize];
-            socket.read_exact(&mut name).await?;
-            Address::DomainName(String::from_utf8(name).unwrap())
-        },
-        0x04 => {
-            let mut buf = [0u8; 16];
-            socket.read_exact(&mut buf).await?;
-            Address::IpAddr(IpAddr::V6(buf.into()))
-        }
-        _ => return Err(RequestError::BadAddressType)
+async fn read_request(socket: &mut TcpStream, already_read: Option<[u8; 2]>) -> Result<Option<Request>, RequestError> {
+    dbg!(&already_read);
+    let (ver, cmd, addr_type) = if let Some(already_read) = already_read {
+        (already_read[0], already_read[1], 0x01u8)
+    } else {
+        let mut fixed_buf = [0u8; 4];
+        socket.read_exact(&mut fixed_buf).await?;
+        let ver = fixed_buf[0];
+        let cmd = fixed_buf[1];
+        let addr_type = fixed_buf[3];
+        (ver, cmd, addr_type)
     };
-    let mut port_buf = [0u8; 2];
-    socket.read_exact(&mut port_buf).await?;
-    let dport = NetworkEndian::read_u16(&port_buf);
-    Ok(Some(Request {
-        address,
-        dport
-    }))
+    let version = match ver {
+        4 => Version::Four,
+        5 => Version::Five,
+        _ => {
+            Reply::SocksFailure.write_error(socket, Version::Five).await?;
+            return Ok(None);
+        }
+    };
+    if cmd != 0x01 {
+        Reply::CommandNotSupported.write_error(socket, Version::Five).await?;
+        return Ok(None);
+    }
+    let request = match version {
+        Version::Four => { 
+            let mut buf = [0u8; 6];
+            socket.read_exact(&mut buf).await?;
+            let mut ip_buf = [0u8; 4];
+            ip_buf.copy_from_slice(&buf[2..6]);
+            let dport = NetworkEndian::read_u16(&buf[0..2]);
+            let ip_addr: Ipv4Addr = ip_buf.into();
+            let mut username = Vec::new();
+            let mut buf = [0u8; 1];
+            loop {
+                socket.read_exact(&mut buf).await?;
+                if buf[0] == 0x0 {
+                    break
+                }
+                username.push(buf[0]);
+            }
+            debug!("got SOCKSv4 connection from {:?}", username);
+            let address = if &ip_addr.octets()[0..3] == &[0, 0, 0] {
+                let mut addr_buf = Vec::new();
+                loop {
+                    socket.read_exact(&mut buf).await?;
+                    if buf[0] == 0x0 {
+                        break
+                    }
+                    addr_buf.push(buf[0]);
+                }
+                Address::DomainName(String::from_utf8_lossy(&addr_buf).into_owned())
+            } else {
+                Address::IpAddr(IpAddr::V4(ip_addr))
+            };
+            Request {
+                address,
+                dport,
+                ver: version
+            }
+        },
+        Version::Five => {
+            let address = match addr_type {
+                0x01 => {
+                    let mut buf = [0u8; 4];
+                    socket.read_exact(&mut buf).await?;
+                    Address::IpAddr(IpAddr::V4(buf.into()))
+                },
+                0x03 => {
+                    let mut len_buf = [0u8; 1];
+                    socket.read_exact(&mut len_buf).await?;
+                    let mut name = vec![0u8; len_buf[0] as usize];
+                    socket.read_exact(&mut name).await?;
+                    Address::DomainName(String::from_utf8_lossy(&name).into_owned())
+                },
+                0x04 => {
+                    let mut buf = [0u8; 16];
+                    socket.read_exact(&mut buf).await?;
+                    Address::IpAddr(IpAddr::V6(buf.into()))
+                }
+                _ => return Err(RequestError::BadAddressType)
+            };
+            let mut port_buf = [0u8; 2];
+            socket.read_exact(&mut port_buf).await?;
+            let dport = NetworkEndian::read_u16(&port_buf);
+            Request {
+                address,
+                dport,
+                ver: version
+            }
+        }
+    };
+    Ok(Some(request))
 }
 
 async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, config: Arc<Config>, stats: &stats::Stats, conn_id: u64) -> Result<bool, Box<dyn Error>> {
+    let address = if config.expect_proxy {
+        let header = proxy::read_proxy_header(&mut socket, address).await?;
+        header.source_address
+    } else {
+        address
+    };
     debug!("{}: accepted connection from {:?}", conn_id, address);
-    if ! handshake_auth(&mut socket).await? {
-        stats.handshake_failed();
-        debug!("{}: handshake failed", conn_id);
-        return Ok(false);
-    }
+    let already_read = match handshake_auth(&mut socket).await? {
+        HandshakeResult::Okay => None,
+        HandshakeResult::Failed => {
+            stats.handshake_failed();
+            debug!("{}: handshake failed", conn_id);
+            return Ok(false);
+        },
+        HandshakeResult::Version4(bytes) => {
+            Some(bytes)
+        }
+    };
     stats.handshake_success();
     debug!("{}: handshake succeeded", conn_id);
-    let request = read_request(&mut socket).await?;
+    let request = read_request(&mut socket, already_read).await?;
     if let Some(request) = request {
+        let version = request.ver;
         stats.set_request(conn_id, &request).await;
         debug!("stats: {:?}", stats);
         let mut conn = match tokio::time::timeout(
@@ -131,44 +208,51 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
                 Ok(Connection::Connected(c)) => c,
                 Ok(Connection::ConnectionNotAllowed) => {
                     warn!("{}: denying connection to {:?}", conn_id, request);
-                    Reply::ConnectionNotAllowed.write_error(&mut socket).await?;
+                    Reply::ConnectionNotAllowed.write_error(&mut socket, version).await?;
                     return Ok(false);
                 },
                 Ok(Connection::AddressNotSupported) => {
                     warn!("{}: bad address family to to {:?}", conn_id, request);
-                    Reply::AddressNotSupported.write_error(&mut socket).await?;
+                    Reply::AddressNotSupported.write_error(&mut socket, version).await?;
                     return Ok(false);
                 }
                 Ok(Connection::SocksFailure) => {
                     warn!("{}: failure (resolution?) to {:?}", conn_id, request);
-                    Reply::SocksFailure.write_error(&mut socket).await?;
+                    Reply::SocksFailure.write_error(&mut socket, version).await?;
                     return Ok(false);
                 }
                 Err(e) => {
-                    Reply::NetworkUnreachable.write_error(&mut socket).await?;
+                    Reply::NetworkUnreachable.write_error(&mut socket, version).await?;
                     warn!("error connecting: {:?}", e);
                     return Ok(false);
                 }
             }
             Err(e) => {
                 warn!("{}: timeout connecting: {:?}", conn_id, e);
-                Reply::TtlExpired.write_error(&mut socket).await?;
+                Reply::TtlExpired.write_error(&mut socket, version).await?;
                 return Ok(false);
             }
         };
         let local_end = conn.local_addr()?;
         debug!("{}: connected to {:?}", conn_id, local_end);
-        socket.write_all(&[0x05, 0x00, 0x01, match local_end {
-            SocketAddr::V4(_) => 0x01,
-            SocketAddr::V6(_) => 0x04
-        }]).await?;
-        match local_end.ip() {
-            IpAddr::V4(i) => socket.write_all(&i.octets()).await?,
-            IpAddr::V6(i) => socket.write_all(&i.octets()).await?,
-        };
-        let mut buf = [0u8; 2];
-        NetworkEndian::write_u16(&mut buf, local_end.port());
-        socket.write_all(&buf).await?;
+        match version {
+            Version::Five => {
+                socket.write_all(&[0x05, 0x00, 0x01, match local_end {
+                    SocketAddr::V4(_) => 0x01,
+                    SocketAddr::V6(_) => 0x04
+                }]).await?;
+                match local_end.ip() {
+                    IpAddr::V4(i) => socket.write_all(&i.octets()).await?,
+                    IpAddr::V6(i) => socket.write_all(&i.octets()).await?,
+                };
+                let mut buf = [0u8; 2];
+                NetworkEndian::write_u16(&mut buf, local_end.port());
+                socket.write_all(&buf).await?;
+            },
+            Version::Four => {
+                socket.write_all(&[0x04, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
+            },
+        }
         let (mut conn_r, mut conn_w) = conn.split();
         let (mut socket_r,  mut socket_w) = socket.split();
         let (first, second) = tokio::join!(
@@ -223,6 +307,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let conf = Arc::new(Config::from_path(matches.value_of("config").unwrap())?);
 
     let stats = Arc::new(stats::Stats::new());
+
+    if let Some(ref stats_socket_listen_address) = conf.stats_socket_listen_address {
+        if stats_socket_listen_address.starts_with("/") {
+            let listener = tokio::net::UnixListener::bind(stats_socket_listen_address)?;
+            tokio::spawn(stats_socket::stats_main_unix(listener, Arc::clone(&stats)));
+        } else {
+            let listener = tokio::net::TcpListener::bind(stats_socket_listen_address).await?;
+            tokio::spawn(stats_socket::stats_main_tcp(listener, Arc::clone(&stats)));
+        }
+    }
 
     let mut listener = TcpListener::bind(&conf.listen_address).await?;
     info!("Listening on: {}", conf.listen_address);

@@ -4,19 +4,28 @@ use std::time::Duration;
 use tokio::net::TcpStream;
 use socket2::{Socket, Domain, Type};
 use log::debug;
+use serde_derive::Serialize;
 
 use crate::config::Config;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type")]
 pub enum Address {
     IpAddr(IpAddr),
     DomainName(String)
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, Serialize)]
+pub enum Version {
+    Four,
+    Five
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct Request {
     pub address: Address,
     pub dport: u16,
+    pub ver: Version,
 }
 
 pub enum Connection {

@@ -1,18 +1,21 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::net::SocketAddr;
-use std::time::Instant;
+use std::time::SystemTime;
 
 use tokio::sync::RwLock;
+use serde_derive::Serialize;
 
 use crate::request::Request;
+use crate::util::serialize_system_time;
 
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Session{
     source_address: SocketAddr,
     dest_address: Option<Request>,
-    start_time: Instant,
+    #[serde(serialize_with="serialize_system_time")]
+    start_time: SystemTime,
 }
 
 
@@ -21,7 +24,7 @@ impl Session {
         Session {
             source_address,
             dest_address: None,
-            start_time: Instant::now()
+            start_time: SystemTime::now()
         }
     }
 
@@ -38,6 +41,14 @@ pub struct Stats {
     in_flight: AtomicU64,
     next_request_id: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DumpableStats<'a> {
+    handshake_failed: u64,
+    handshake_success: u64,
+    in_flight: u64,
+    sessions: &'a HashMap<u64, Session>,
 }
 
 impl Stats {
@@ -76,5 +87,16 @@ impl Stats {
     pub async fn set_request(&self, request_id: u64, request: &Request) {
         let mut lock = self.sessions.write().await;
         lock.get_mut(&request_id).map(|s| s.set_request(request));
+    }
+
+    pub async fn serialize_to_vec(&self) -> Result<Vec<u8>, serde_json::error::Error> {
+        let lock = self.sessions.read().await;
+        let buf = DumpableStats {
+            handshake_failed: self.handshake_failed.load(Ordering::Relaxed),
+            handshake_success: self.handshake_success.load(Ordering::Relaxed),
+            in_flight: self.in_flight.load(Ordering::Relaxed),
+            sessions: &*lock,
+        };
+        serde_json::to_vec(&buf)
     }
 }

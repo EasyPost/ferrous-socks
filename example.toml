@@ -13,6 +13,9 @@ bind-addresses = [
 connect-timeout-ms = 3000
 # this timeout is applied to the entire request
 total-timeout-ms = 900000
+# this address is listened to for stats requests. if it starts with /, it is a stream-mode UNIX domain socket;
+# otherwise, it is a TCP socket address
+stats-socket-listen-address = "[::1]:8081"
 # this ACL is evaluated sequentially; the first rule that maches has its action applied
 acl = [
     {destination_network = "192.168.0.0/16", action="Reject"},
@@ -28,3 +31,5 @@ acl = [
 ]
 # if no rules in the ACL match, this rule is applied
 acl-default-action = "Reject"
+# whether or not to expect the PROXY protocol
+expect-proxy = false

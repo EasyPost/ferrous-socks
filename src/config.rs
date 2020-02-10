@@ -89,6 +89,10 @@ pub struct Config {
     pub connect_timeout_ms: u32,
     #[serde(alias = "total-timeout-ms")]
     pub total_timeout_ms: Option<u32>,
+    #[serde(alias = "stats-socket-listen-address")]
+    pub stats_socket_listen_address: Option<String>,
+    #[serde(alias = "expect-proxy", default="_false")]
+    pub expect_proxy: bool,
 }
 
 

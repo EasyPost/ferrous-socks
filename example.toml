@@ -7,6 +7,8 @@ acl = [
     {destination_network = "fe80::/10", action="Reject"},
     {destination_network = "127.0.0.0/8", action="Reject"},
     {destination_network = "::1/128", action="Reject"},
-    {action="Allow"},
+    {destination_port = 443, action = "Allow"},
+    {destination_port = 80, action = "Allow"},
+    {destination_port = 22, action = "Allow"},
 ]
-disallow-private = true
+default-action = "Reject"

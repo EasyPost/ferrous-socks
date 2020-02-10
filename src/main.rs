@@ -46,7 +46,7 @@ enum Address {
     DomainName(String)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Request {
     address: Address,
     dport: u16,
@@ -91,8 +91,8 @@ impl From<tokio::io::Error> for RequestError {
     }
 }
 
+#[derive(Debug)]
 enum Reply {
-    Success,
     SocksFailure,
     ConnectionNotAllowed,
     NetworkUnreachable,
@@ -107,7 +107,6 @@ impl Reply {
         use Reply::*;
 
         match self {
-            Success => 0x00,
             SocksFailure => 0x01,
             ConnectionNotAllowed => 0x02,
             NetworkUnreachable => 0x03,
@@ -183,15 +182,14 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
     debug!("{}: handshake succeeded", conn_id);
     let request = read_request(&mut socket).await?;
     if let Some(request) = request {
-        let ip = request.address.clone();
         let mut conn = match tokio::time::timeout(
                 Duration::from_millis(3000),
-                request.connect(&config)
+                request.clone().connect(&config)
             ).await {
             Ok(c) => match c {
                 Ok(Some(c)) => c,
                 Ok(None) => {
-                    warn!("{}: denying connection to {:?}", conn_id, ip);
+                    warn!("{}: denying connection to {:?}", conn_id, request);
                     Reply::ConnectionNotAllowed.write_error(&mut socket).await?;
                     return Ok(false);
                 },

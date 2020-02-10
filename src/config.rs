@@ -37,10 +37,25 @@ fn _false() -> bool {
     false
 }
 
-#[derive(Debug, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Deserialize)]
 pub(crate) enum AclAction {
     Allow,
     Reject
+}
+
+impl AclAction {
+    fn permitted(&self) -> bool {
+        match self {
+            AclAction::Allow => true,
+            AclAction::Reject => false
+        }
+    }
+}
+
+impl Default for AclAction {
+    fn default() -> Self {
+        AclAction::Allow
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -55,6 +70,8 @@ pub(crate) struct Config {
     #[serde(alias = "bind-address")]
     pub bind_address: String,
     pub acl: Vec<AclItem>,
+    #[serde(alias="default-action")]
+    pub default_action: AclAction
 }
 
 
@@ -72,9 +89,9 @@ impl Config {
             let ip_match = rule.destination_network.map(|i| i.contains(ip)).unwrap_or(true);
             let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
             if ip_match && port_match {
-                return rule.action == AclAction::Allow;
+                return rule.action.permitted()
             }
         }
-        true
+        self.default_action.permitted()
     }
 }

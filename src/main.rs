@@ -8,6 +8,8 @@ use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
 use derive_more::Display;
 use log::{debug, error, info, warn};
+use net2::unix::UnixTcpBuilderExt;
+use net2::TcpBuilder;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
 
@@ -347,7 +349,32 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let mut listener = TcpListener::bind(&conf.listen_address).await?;
+    let addr: SocketAddr = conf
+        .listen_address
+        .parse()
+        .expect("listen_address should parse as a socket address");
+
+    let listener = if addr.is_ipv6() {
+        TcpBuilder::new_v6().unwrap()
+    } else {
+        TcpBuilder::new_v4().unwrap()
+    };
+    let listener = listener
+        .only_v6(false)
+        .expect("failed to set IPV6_V6ONLY")
+        .reuse_address(true)
+        .expect("failed to set SO_REUSEADDR");
+
+    #[cfg(all(unix, not(any(target_os = "solaris"))))]
+    let listener = listener
+        .reuse_port(conf.reuse_port)
+        .expect("failed to set SO_REUSEPORT");
+
+    let listener = listener
+        .bind(addr)
+        .expect(format!("failed to bind to {:?}", addr).as_str());
+
+    let mut listener = TcpListener::from_std(listener.listen(128)?)?;
     info!("Listening on: {}", conf.listen_address);
 
     loop {

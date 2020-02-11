@@ -91,6 +91,8 @@ pub struct Config {
     pub stats_socket_listen_address: Option<String>,
     #[serde(alias = "expect-proxy", default = "_false")]
     pub expect_proxy: bool,
+    #[serde(alias = "reuse-port", default = "_false")]
+    pub reuse_port: bool,
 }
 
 impl Config {

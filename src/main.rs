@@ -250,7 +250,7 @@ async fn handle_one_connection(mut socket: TcpStream, address: SocketAddr, confi
                 socket.write_all(&buf).await?;
             },
             Version::Four => {
-                socket.write_all(&[0x04, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
+                socket.write_all(&[0x00, 0x5a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
             },
         }
         let (mut conn_r, mut conn_w) = conn.split();

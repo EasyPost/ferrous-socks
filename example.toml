@@ -1,5 +1,5 @@
 # this is the address to listen on for incoming sesions
-listen-address = "[::1]:8080"
+listen-address = "127.0.0.1:8080"
 # this is a list of addresses to bind to for outgoing connections. If not passed, it defaults to [0.0.0.0, ::].
 # if you don't pass any IPv4 addresses, IPv4 requests will be deined. Ditto for IPv6.
 # 0.0.0.0 and :: are treated as INADDR_ANY (even on platforms where that's not what INADDR_ANY is defined as) and use

@@ -31,7 +31,7 @@ impl Reply {
 
     pub async fn write_error<A: AsyncWrite + Unpin>(&self, into: &mut A, version: Version) -> Result<(), tokio::io::Error> {
         match version {
-            Version::Four => into.write_all(&[0x04, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await,
+            Version::Four => into.write_all(&[0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await,
             Version::Five => into.write_all(&[0x05, self.as_u8(), 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await
         }
     }

@@ -16,8 +16,13 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     let dumped = stats.serialize_to_vec().await;
-    if let Ok(dumped) = dumped {
-        socket.write_all(&dumped).await?;
+    match dumped {
+        Ok(dumped) => {
+            socket.write_all(&dumped).await?;
+        }
+        Err(e) => {
+            warn!("error dumping stats: {:?}", e);
+        }
     }
     Ok(())
 }
@@ -45,7 +50,7 @@ pub async fn stats_main_tcp(mut listener: TcpListener, stats: Arc<Stats>) {
                 return;
             }
         };
-        debug!("conn from {:?}", address);
+        debug!("stats conn from {:?}", address);
         let my_stats = Arc::clone(&stats);
         tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
     }
@@ -60,7 +65,7 @@ pub async fn stats_main_unix(mut listener: UnixListener, stats: Arc<Stats>) {
                 return;
             }
         };
-        debug!("conn from {:?}", address);
+        debug!("stats conn from {:?}", address);
         let my_stats = Arc::clone(&stats);
         tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
     }

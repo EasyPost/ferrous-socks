@@ -9,7 +9,7 @@ use tokio::net::TcpStream;
 use crate::config::Config;
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(tag = "type")]
+#[serde(untagged)]
 pub enum Address {
     IpAddr(IpAddr),
     DomainName(String),
@@ -17,7 +17,9 @@ pub enum Address {
 
 #[derive(Debug, Clone, Copy, Serialize)]
 pub enum Version {
+    #[serde(rename = "4")]
     Four,
+    #[serde(rename = "5")]
     Five,
 }
 

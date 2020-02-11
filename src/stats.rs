@@ -12,7 +12,7 @@ use crate::util::serialize_system_time;
 #[derive(Debug, Serialize)]
 pub struct Session {
     source_address: SocketAddr,
-    dest_address: Option<Request>,
+    request: Option<Request>,
     #[serde(serialize_with = "serialize_system_time")]
     start_time: SystemTime,
 }
@@ -21,13 +21,13 @@ impl Session {
     fn new(source_address: SocketAddr) -> Self {
         Session {
             source_address,
-            dest_address: None,
+            request: None,
             start_time: SystemTime::now(),
         }
     }
 
     fn set_request(&mut self, request: &Request) {
-        self.dest_address = Some(request.clone());
+        self.request = Some(request.clone());
     }
 }
 

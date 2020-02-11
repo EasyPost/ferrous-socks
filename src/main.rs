@@ -199,7 +199,6 @@ async fn handle_one_connection(
     if let Some(request) = request {
         let version = request.ver;
         stats.set_request(conn_id, &request).await;
-        debug!("stats: {:?}", stats);
         let mut conn = match tokio::time::timeout(
             Duration::from_millis(config.connect_timeout_ms.into()),
             request.clone().connect(&config),

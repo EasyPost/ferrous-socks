@@ -130,9 +130,9 @@ pub(crate) async fn read_proxy_header(
         Family::Unspec => return Err(HeaderError::UnsupportedFamilyOrAddress),
     };
     Ok(ProxyHeader {
-        mode: mode,
-        family: family,
-        transport: transport,
-        source_address: source_address,
+        mode,
+        family,
+        transport,
+        source_address,
     })
 }

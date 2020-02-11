@@ -50,7 +50,7 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio
         socket.write_all(&[0x5u8, 0x00u8]).await?;
         Ok(HandshakeResult::Okay)
     } else {
-        socket.write_all(&[05u8, 0xffu8]).await?;
+        socket.write_all(&[0x5u8, 0xffu8]).await?;
         Ok(HandshakeResult::Failed)
     }
 }
@@ -127,7 +127,7 @@ async fn read_request(
                 username.push(buf[0]);
             }
             debug!("got SOCKSv4 connection from {:?}", username);
-            let address = if &ip_addr.octets()[0..3] == &[0, 0, 0] {
+            let address = if ip_addr.octets()[0..3] == [0, 0, 0] {
                 let mut addr_buf = Vec::new();
                 loop {
                     socket.read_exact(&mut buf).await?;
@@ -349,7 +349,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let stats = Arc::new(stats::Stats::new());
 
     if let Some(ref stats_socket_listen_address) = conf.stats_socket_listen_address {
-        if stats_socket_listen_address.starts_with("/") {
+        if stats_socket_listen_address.starts_with('/') {
             let listener = tokio::net::UnixListener::bind(stats_socket_listen_address)?;
             tokio::spawn(stats_socket::stats_main_unix(listener, Arc::clone(&stats)));
         } else {

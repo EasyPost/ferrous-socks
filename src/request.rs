@@ -66,7 +66,7 @@ async fn connect_one(
     config: &Config,
 ) -> Result<Connection, tokio::io::Error> {
     let conn = if config.is_permitted(addr, port) {
-        if config.bind_addresses.len() == 0 {
+        if config.bind_addresses.is_empty() {
             Connection::Connected(TcpStream::connect((addr, port)).await?)
         } else {
             let timeout = Duration::from_millis(config.connect_timeout_ms.into());

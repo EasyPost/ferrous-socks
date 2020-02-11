@@ -7,15 +7,12 @@ where
     S: serde::Serializer,
 {
     let elapsed = ts.elapsed().unwrap();
-    match ts.duration_since(UNIX_EPOCH) {
-        Ok(dur) => {
-            let mut f = ser.serialize_struct("time", 2)?;
-            f.serialize_field("ts", &dur.as_secs_f64())?;
-            f.serialize_field("ago", &elapsed.as_secs_f64())?;
-            f.end()
-        }
-        Err(_) => {
-            unimplemented!();
-        }
+    if let Ok(dur) = ts.duration_since(UNIX_EPOCH) {
+        let mut f = ser.serialize_struct("time", 2)?;
+        f.serialize_field("ts", &dur.as_secs_f64())?;
+        f.serialize_field("ago", &elapsed.as_secs_f64())?;
+        f.end()
+    } else {
+        ser.serialize_str("unknown")
     }
 }

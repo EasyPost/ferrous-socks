@@ -83,7 +83,9 @@ impl Stats {
 
     pub async fn set_request(&self, request_id: u64, request: &Request) {
         let mut lock = self.sessions.write().await;
-        lock.get_mut(&request_id).map(|s| s.set_request(request));
+        if let Some(s) = lock.get_mut(&request_id) {
+            s.set_request(request)
+        }
     }
 
     pub async fn serialize_to_vec(&self) -> Result<Vec<u8>, serde_json::error::Error> {

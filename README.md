@@ -7,13 +7,11 @@ Features:
  - Server-side DNS resolution
  - ACL functionality
  - Specifying bind addresses for outgoing IPv4 and IPv6 sessions
-
-Coming soon:
-
- - Operational statistics via a domain socket
+ - Operational statistics via a domain socket or TCP socket
+ - basic SOCKS4 and SOCKS4a support (username parameter is ignored)
 
 Not implemented:
 
- - Authentication
+ - Authentication (SOCKS5 only accepts anonymous handshakes)
 
 Check out [example.toml](example.toml) for an example of what the config file looks like.

@@ -1,12 +1,11 @@
 use std::fs::File;
-use std::path::Path;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::path::Path;
 
 use derive_more::Display;
-use serde_derive::Deserialize;
 use ip_network::IpNetwork;
-
+use serde_derive::Deserialize;
 
 #[derive(Debug, Display)]
 pub enum ConfigError {
@@ -14,7 +13,7 @@ pub enum ConfigError {
     DeserializationError(toml::de::Error),
 }
 
-impl std::error::Error for ConfigError { }
+impl std::error::Error for ConfigError {}
 
 impl From<std::io::Error> for ConfigError {
     fn from(e: std::io::Error) -> Self {
@@ -27,7 +26,6 @@ impl From<toml::de::Error> for ConfigError {
         ConfigError::DeserializationError(e)
     }
 }
-
 
 fn _true() -> bool {
     true
@@ -51,14 +49,14 @@ fn _default_connect_timeout_ms() -> u32 {
 #[derive(Debug, Deserialize)]
 pub enum AclAction {
     Allow,
-    Reject
+    Reject,
 }
 
 impl AclAction {
     fn permitted(&self) -> bool {
         match self {
             AclAction::Allow => true,
-            AclAction::Reject => false
+            AclAction::Reject => false,
         }
     }
 }
@@ -80,21 +78,20 @@ pub struct AclItem {
 pub struct Config {
     #[serde(alias = "listen-address")]
     pub listen_address: String,
-    #[serde(alias = "bind-addresses", default="_default_bind")]
+    #[serde(alias = "bind-addresses", default = "_default_bind")]
     pub bind_addresses: Vec<IpAddr>,
     pub acl: Vec<AclItem>,
-    #[serde(alias="acl-default-action")]
+    #[serde(alias = "acl-default-action")]
     pub acl_default_action: AclAction,
-    #[serde(alias = "connect-timeout-ms", default="_default_connect_timeout_ms")]
+    #[serde(alias = "connect-timeout-ms", default = "_default_connect_timeout_ms")]
     pub connect_timeout_ms: u32,
     #[serde(alias = "total-timeout-ms")]
     pub total_timeout_ms: Option<u32>,
     #[serde(alias = "stats-socket-listen-address")]
     pub stats_socket_listen_address: Option<String>,
-    #[serde(alias = "expect-proxy", default="_false")]
+    #[serde(alias = "expect-proxy", default = "_false")]
     pub expect_proxy: bool,
 }
-
 
 impl Config {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
@@ -107,10 +104,13 @@ impl Config {
 
     pub fn is_permitted(&self, ip: IpAddr, dport: u16) -> bool {
         for rule in self.acl.iter() {
-            let ip_match = rule.destination_network.map(|i| i.contains(ip)).unwrap_or(true);
+            let ip_match = rule
+                .destination_network
+                .map(|i| i.contains(ip))
+                .unwrap_or(true);
             let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
             if ip_match && port_match {
-                return rule.action.permitted()
+                return rule.action.permitted();
             }
         }
         self.acl_default_action.permitted()

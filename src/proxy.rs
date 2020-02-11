@@ -1,17 +1,16 @@
 use std::error::Error;
 use std::io::Cursor;
-use std::net::{SocketAddr, IpAddr};
+use std::net::{IpAddr, SocketAddr};
 
 use byteorder::NetworkEndian;
 use derive_more::Display;
-use tokio::prelude::*;
 use tokio::net::TcpStream;
-
+use tokio::prelude::*;
 
 #[derive(Debug)]
 pub(crate) enum Mode {
     Local,
-    Proxy
+    Proxy,
 }
 
 #[derive(Debug)]
@@ -19,15 +18,14 @@ pub(crate) enum Family {
     Unspec,
     Inet,
     Inet6,
-    Unix
+    Unix,
 }
-
 
 #[derive(Debug)]
 pub(crate) enum Transport {
     Empty,
     Stream,
-    Dgram
+    Dgram,
 }
 
 #[derive(Debug)]
@@ -35,7 +33,7 @@ pub(crate) struct ProxyHeader {
     pub mode: Mode,
     pub family: Family,
     pub transport: Transport,
-    pub source_address: SocketAddr
+    pub source_address: SocketAddr,
 }
 
 #[derive(Debug, Display)]
@@ -50,8 +48,7 @@ pub(crate) enum HeaderError {
     UnsupportedFamilyOrAddress,
 }
 
-impl Error for HeaderError {
-}
+impl Error for HeaderError {}
 
 impl From<tokio::io::Error> for HeaderError {
     fn from(e: tokio::io::Error) -> HeaderError {
@@ -59,8 +56,10 @@ impl From<tokio::io::Error> for HeaderError {
     }
 }
 
-
-pub(crate) async fn read_proxy_header(socket: &mut TcpStream, address: SocketAddr) -> Result<ProxyHeader, HeaderError> {
+pub(crate) async fn read_proxy_header(
+    socket: &mut TcpStream,
+    address: SocketAddr,
+) -> Result<ProxyHeader, HeaderError> {
     println!("about to read header");
     let mut fixed_header = [0u8; 16];
     println!("read header: {:?}", fixed_header);
@@ -70,7 +69,8 @@ pub(crate) async fn read_proxy_header(socket: &mut TcpStream, address: SocketAdd
     }
     let version_command = fixed_header[13];
     let family_address = fixed_header[14];
-    let remaining_len = byteorder::ReadBytesExt::read_u16::<NetworkEndian>(&mut &fixed_header[15..16])?;
+    let remaining_len =
+        byteorder::ReadBytesExt::read_u16::<NetworkEndian>(&mut &fixed_header[15..16])?;
     dbg!(&remaining_len);
     let version = version_command >> 4;
     if version != 0x02 {
@@ -80,7 +80,7 @@ pub(crate) async fn read_proxy_header(socket: &mut TcpStream, address: SocketAdd
     let mode = match version_command & 0x0f {
         0x00 => Mode::Local,
         0x01 => Mode::Proxy,
-        other => return Err(HeaderError::InvalidMode(other))
+        other => return Err(HeaderError::InvalidMode(other)),
     };
     dbg!(&mode);
     let family = match family_address >> 4 {
@@ -88,21 +88,21 @@ pub(crate) async fn read_proxy_header(socket: &mut TcpStream, address: SocketAdd
         0x01 => Family::Inet,
         0x02 => Family::Inet6,
         0x03 => Family::Unix,
-        other => return Err(HeaderError::InvalidFamily(other))
+        other => return Err(HeaderError::InvalidFamily(other)),
     };
     dbg!(&family);
     let transport = match family_address & 0x0f {
         0x00 => Transport::Empty,
         0x01 => Transport::Stream,
         0x02 => Transport::Dgram,
-        other => return Err(HeaderError::InvalidTransport(other))
+        other => return Err(HeaderError::InvalidTransport(other)),
     };
     dbg!(&transport);
     let source_address = match family {
         Family::Unix => {
             eprintln!("remaining data is {}", remaining_len);
             address
-        },
+        }
         Family::Inet => {
             if remaining_len != 12 {
                 eprintln!("expected 96 bytes of address; got {:?}", remaining_len);
@@ -116,22 +116,23 @@ pub(crate) async fn read_proxy_header(socket: &mut TcpStream, address: SocketAdd
             let _ = byteorder::ReadBytesExt::read_u32::<NetworkEndian>(&mut cursor);
             let source_port = byteorder::ReadBytesExt::read_u16::<NetworkEndian>(&mut cursor)?;
             SocketAddr::new(source_addr, source_port)
-        },
+        }
         Family::Inet6 => {
             let mut buf = [0u8; 36];
             let mut ip_buf = [0u8; 16];
             ip_buf.copy_from_slice(&buf[0..16]);
             socket.read_exact(&mut buf).await?;
             let source_addr = IpAddr::V6(ip_buf.into());
-            let source_port = byteorder::ReadBytesExt::read_u16::<NetworkEndian>(&mut &buf[32..34])?;
+            let source_port =
+                byteorder::ReadBytesExt::read_u16::<NetworkEndian>(&mut &buf[32..34])?;
             SocketAddr::new(source_addr, source_port)
-        },
-        Family::Unspec => return Err(HeaderError::UnsupportedFamilyOrAddress)
+        }
+        Family::Unspec => return Err(HeaderError::UnsupportedFamilyOrAddress),
     };
     Ok(ProxyHeader {
         mode: mode,
         family: family,
         transport: transport,
-        source_address: source_address
+        source_address: source_address,
     })
 }

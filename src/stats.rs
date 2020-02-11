@@ -1,30 +1,28 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
-use tokio::sync::RwLock;
 use serde_derive::Serialize;
+use tokio::sync::RwLock;
 
 use crate::request::Request;
 use crate::util::serialize_system_time;
 
-
 #[derive(Debug, Serialize)]
-pub struct Session{
+pub struct Session {
     source_address: SocketAddr,
     dest_address: Option<Request>,
-    #[serde(serialize_with="serialize_system_time")]
+    #[serde(serialize_with = "serialize_system_time")]
     start_time: SystemTime,
 }
-
 
 impl Session {
     fn new(source_address: SocketAddr) -> Self {
         Session {
             source_address,
             dest_address: None,
-            start_time: SystemTime::now()
+            start_time: SystemTime::now(),
         }
     }
 
@@ -32,7 +30,6 @@ impl Session {
         self.dest_address = Some(request.clone());
     }
 }
-
 
 #[derive(Debug)]
 pub struct Stats {

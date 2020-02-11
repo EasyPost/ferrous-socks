@@ -41,32 +41,40 @@ where
     }
 }
 
-pub async fn stats_main_tcp(mut listener: TcpListener, stats: Arc<Stats>) {
-    loop {
-        let (socket, address) = match listener.accept().await {
-            Ok(o) => o,
-            Err(e) => {
-                warn!("error accepting on stats socket: {:?}", e);
-                return;
+/* This is gross.
+ *
+ * async functions in traits isn't stable, so there's no trait that both
+ * TcpListener and UnixListener implement. Therefore, if we want to be able
+ * to do both, we have to copy-pasta the code. At least do it with a macro!
+ *
+ * In some better universe there'd be something like
+ *
+ * trait StreamListener {
+ *   type StreamType: AsyncRead + AsyncWrite + Unpin;
+ *   type AddressType;
+ *
+ *   async fn accept() -> (Self::StreamType, Self::AddressType);
+ * }
+ */
+
+macro_rules! generate_stats_main {
+    ($name:ident, $listener_type:ty) => {
+        pub async fn $name(mut listener: $listener_type, stats: Arc<Stats>) {
+            loop {
+                let (socket, address) = match listener.accept().await {
+                    Ok(o) => o,
+                    Err(e) => {
+                        warn!("error accepting on stats socket: {:?}", e);
+                        return;
+                    }
+                };
+                debug!("stats conn from {:?}", address);
+                let my_stats = Arc::clone(&stats);
+                tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
             }
-        };
-        debug!("stats conn from {:?}", address);
-        let my_stats = Arc::clone(&stats);
-        tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
-    }
+        }
+    };
 }
 
-pub async fn stats_main_unix(mut listener: UnixListener, stats: Arc<Stats>) {
-    loop {
-        let (socket, address) = match listener.accept().await {
-            Ok(o) => o,
-            Err(e) => {
-                warn!("error accepting on stats socket: {:?}", e);
-                return;
-            }
-        };
-        debug!("stats conn from {:?}", address);
-        let my_stats = Arc::clone(&stats);
-        tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
-    }
-}
+generate_stats_main!(stats_main_tcp, TcpListener);
+generate_stats_main!(stats_main_unix, UnixListener);

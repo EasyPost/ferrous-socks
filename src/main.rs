@@ -360,10 +360,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         TcpBuilder::new_v4().unwrap()
     };
     let listener = listener
-        .only_v6(false)
-        .expect("failed to set IPV6_V6ONLY")
         .reuse_address(true)
         .expect("failed to set SO_REUSEADDR");
+
+    let listener = if addr.is_ipv6() {
+        listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
+    } else {
+        listener
+    };
 
     #[cfg(all(unix, not(any(target_os = "solaris"))))]
     let listener = listener

@@ -1,4 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::net::TcpStream;
 
 use serde::ser::SerializeStruct;
 
@@ -15,4 +17,14 @@ where
     } else {
         ser.serialize_str("unknown")
     }
+}
+
+pub async fn copy_then_shutdown<S, D>(src: &mut S, dest: &mut D) -> Result<(), tokio::io::Error>
+where
+    S: AsyncRead + Unpin,
+    D: AsRef<TcpStream> + AsyncWrite + Unpin,
+{
+    tokio::io::copy(src, dest).await?;
+    dest.as_ref().shutdown(std::net::Shutdown::Write)?;
+    Ok(())
 }

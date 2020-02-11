@@ -69,16 +69,6 @@ impl From<tokio::io::Error> for RequestError {
     }
 }
 
-async fn copy_then_shutdown<S, D>(src: &mut S, dest: &mut D) -> Result<(), tokio::io::Error>
-where
-    S: AsyncRead + Unpin,
-    D: AsRef<TcpStream> + AsyncWrite + Unpin,
-{
-    tokio::io::copy(src, dest).await?;
-    dest.as_ref().shutdown(std::net::Shutdown::Write)?;
-    Ok(())
-}
-
 async fn read_request(
     socket: &mut TcpStream,
     already_read: Option<[u8; 2]>,
@@ -285,8 +275,8 @@ async fn handle_one_connection(
         let (mut conn_r, mut conn_w) = conn.split();
         let (mut socket_r, mut socket_w) = socket.split();
         let (first, second) = tokio::join!(
-            copy_then_shutdown(&mut conn_r, &mut socket_w),
-            copy_then_shutdown(&mut socket_r, &mut conn_w)
+            util::copy_then_shutdown(&mut conn_r, &mut socket_w),
+            util::copy_then_shutdown(&mut socket_r, &mut conn_w)
         );
         first?;
         second?;

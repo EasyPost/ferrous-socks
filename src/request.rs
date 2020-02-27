@@ -44,19 +44,15 @@ async fn connect_bind(
     debug!("connecting with explicit bind of {:?}", bind_addr);
     let connect = SocketAddr::new(connect_addr, connect_port).into();
     let bind = SocketAddr::new(bind_addr, 0).into();
-    let stream = if bind_addr.is_ipv4() {
-        let socket = Socket::new(Domain::ipv4(), Type::stream(), None)?;
-        socket.bind(&bind)?;
-        // This method is undocumented but works
-        // see https://github.com/tokio-rs/mio/issues/1257 for details
-        TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?
+    let socket = if bind_addr.is_ipv4() {
+        Socket::new(Domain::ipv4(), Type::stream(), None)?
     } else {
-        let socket = Socket::new(Domain::ipv6(), Type::stream(), None)?;
-        socket.bind(&bind)?;
-        // This method is undocumented but works
-        // see https://github.com/tokio-rs/mio/issues/1257 for details
-        TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?
+        Socket::new(Domain::ipv6(), Type::stream(), None)?
     };
+    socket.bind(&bind)?;
+    // This method is undocumented but works
+    // see https://github.com/tokio-rs/mio/issues/1257 for details
+    let stream = TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?;
     Ok(stream)
 }
 

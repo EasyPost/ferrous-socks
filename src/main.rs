@@ -161,11 +161,7 @@ async fn read_request(
             } else {
                 Address::IpAddr(IpAddr::V4(ip_addr))
             };
-            Request {
-                address,
-                dport,
-                ver: version,
-            }
+            Request::new(address, dport, version)
         }
         Version::Five => {
             let address = match addr_type {
@@ -191,11 +187,7 @@ async fn read_request(
             let mut port_buf = [0u8; 2];
             socket.read_exact(&mut port_buf).await?;
             let dport = NetworkEndian::read_u16(&port_buf);
-            Request {
-                address,
-                dport,
-                ver: version,
-            }
+            Request::new(address, dport, version)
         }
     };
     Ok(Some(request))
@@ -215,11 +207,13 @@ async fn handle_one_connection(
         address
     };
     debug!("{}: accepted connection from {:?}", conn_id, address);
+    let mut username = None;
     let already_read = match handshake_auth(&mut socket).await? {
         HandshakeResult::Okay => None,
         HandshakeResult::AuthenticatedAs(u) => {
             stats.handshake_authenticated();
             debug!("{}: authenticated as {:?}", conn_id, u);
+            username = Some(u);
             None
         }
         HandshakeResult::Failed => {
@@ -232,7 +226,8 @@ async fn handle_one_connection(
     stats.handshake_success();
     debug!("{}: handshake succeeded", conn_id);
     let request = read_request(&mut socket, already_read).await?;
-    if let Some(request) = request {
+    if let Some(mut request) = request {
+        request.username = username;
         let version = request.ver;
         stats.set_request(conn_id, &request).await;
         let mut conn = match tokio::time::timeout(

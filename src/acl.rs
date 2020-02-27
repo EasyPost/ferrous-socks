@@ -28,6 +28,7 @@ pub struct AclItem {
     pub action: AclAction,
     pub destination_network: Option<IpNetwork>,
     pub destination_port: Option<u16>,
+    pub username: Option<String>,
 }
 
 #[derive(Debug)]
@@ -44,14 +45,19 @@ impl Acl {
         }
     }
 
-    pub fn is_permitted(&self, ip: IpAddr, dport: u16) -> bool {
+    pub fn is_permitted(&self, username: Option<&str>, ip: IpAddr, dport: u16) -> bool {
         for rule in self.items.iter() {
             let ip_match = rule
                 .destination_network
                 .map(|i| i.contains(ip))
                 .unwrap_or(true);
             let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
-            if ip_match && port_match {
+            let username_match = if let Some(u) = username {
+                rule.username.as_ref().map(|p| p == u).unwrap_or(true)
+            } else {
+                false
+            };
+            if ip_match && port_match && username_match {
                 return rule.action.permitted();
             }
         }

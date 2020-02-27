@@ -27,6 +27,24 @@ pub struct Request {
     pub address: Address,
     pub dport: u16,
     pub ver: Version,
+    pub username: Option<String>,
+}
+
+impl Request {
+    pub fn new(address: Address, dport: u16, ver: Version, username: Option<String>) -> Self {
+        Request {
+            address,
+            dport,
+            ver,
+            username: username,
+        }
+    }
+
+    pub fn set_username(&mut self, username: Option<String>) {
+        if username.is_some() {
+            self.username = username
+        }
+    }
 }
 
 pub enum Connection {
@@ -57,11 +75,12 @@ async fn connect_bind(
 }
 
 async fn connect_one(
+    username: Option<&str>,
     addr: IpAddr,
     port: u16,
     config: &Config,
 ) -> Result<Connection, tokio::io::Error> {
-    let conn = if config.acl.is_permitted(addr, port) {
+    let conn = if config.acl.is_permitted(username, addr, port) {
         if config.bind_addresses.is_empty() {
             Connection::Connected(TcpStream::connect((addr, port)).await?)
         } else {
@@ -103,13 +122,17 @@ async fn connect_one(
 impl Request {
     pub async fn connect(self, config: &Config) -> Result<Connection, tokio::io::Error> {
         let conn = match self.address {
-            Address::IpAddr(i) => connect_one(i, self.dport, config).await?,
+            Address::IpAddr(i) => {
+                connect_one(self.username.as_deref(), i, self.dport, config).await?
+            }
             Address::DomainName(d) => {
                 let mut saw_not_allowed = false;
                 let mut saw_not_supported = false;
                 let lookup = format!("{}:{}", d.as_str(), self.dport);
                 for addr in tokio::net::lookup_host(lookup.as_str()).await? {
-                    match connect_one(addr.ip(), self.dport, config).await? {
+                    match connect_one(self.username.as_deref(), addr.ip(), self.dport, config)
+                        .await?
+                    {
                         Connection::Connected(c) => return Ok(Connection::Connected(c)),
                         Connection::AddressNotSupported => {
                             saw_not_supported = true;

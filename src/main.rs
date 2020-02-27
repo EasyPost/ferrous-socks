@@ -369,9 +369,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("listen_address should parse as a socket address");
 
     let listener = if addr.is_ipv6() {
-        TcpBuilder::new_v6().unwrap()
+        TcpBuilder::new_v6().expect("failed to create IPv6 socket")
     } else {
-        TcpBuilder::new_v4().unwrap()
+        TcpBuilder::new_v4().expect("failed to create IPv4 socket")
     };
     let listener = listener
         .reuse_address(true)

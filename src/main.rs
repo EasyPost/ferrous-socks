@@ -46,7 +46,7 @@ async fn authenticate_rfc1929(socket: &mut TcpStream) -> Result<Option<String>, 
     let mut password = vec![0u8; password_len[0] as usize];
     socket.read_exact(&mut password).await?;
     socket.write_all(&[0x1u8, 0x0u8]).await?;
-    return Ok(Some(String::from_utf8_lossy(&username).into_owned()));
+    Ok(Some(String::from_utf8_lossy(&username).into_owned()))
 }
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio::io::Error> {

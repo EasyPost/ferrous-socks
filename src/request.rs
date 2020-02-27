@@ -42,7 +42,7 @@ async fn connect_bind(
     connect_port: u16,
 ) -> Result<TcpStream, tokio::io::Error> {
     debug!("connecting with explicit bind of {:?}", bind_addr);
-    let connect = SocketAddr::new(connect_addr, connect_port).into();
+    let connect = SocketAddr::new(connect_addr, connect_port);
     let bind = SocketAddr::new(bind_addr, 0).into();
     let socket = if bind_addr.is_ipv4() {
         Socket::new(Domain::ipv4(), Type::stream(), None)?

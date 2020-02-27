@@ -277,8 +277,12 @@ async fn handle_one_connection(
                 return Ok(false);
             }
         };
+        let remote_end = conn.peer_addr()?;
         let local_end = conn.local_addr()?;
-        debug!("{}: connected to {:?}", conn_id, local_end);
+        debug!(
+            "{}: connected to {:?} from {:?}",
+            conn_id, remote_end, local_end
+        );
         match version {
             Version::Five => {
                 socket

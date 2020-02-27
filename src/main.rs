@@ -341,10 +341,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     if let Some(ref stats_socket_listen_address) = conf.stats_socket_listen_address {
         if stats_socket_listen_address.starts_with('/') {
-            let listener = tokio::net::UnixListener::bind(stats_socket_listen_address)?;
+            let listener = tokio::net::UnixListener::bind(stats_socket_listen_address).expect(
+                format!(
+                    "failed to bind to domain socket {:?}",
+                    stats_socket_listen_address
+                )
+                .as_str(),
+            );
             tokio::spawn(stats_socket::stats_main_unix(listener, Arc::clone(&stats)));
         } else {
-            let listener = tokio::net::TcpListener::bind(stats_socket_listen_address).await?;
+            let listener = tokio::net::TcpListener::bind(stats_socket_listen_address)
+                .await
+                .expect(
+                    format!(
+                        "failed to bind to TCP socket {:?}",
+                        stats_socket_listen_address
+                    )
+                    .as_str(),
+                );
             tokio::spawn(stats_socket::stats_main_tcp(listener, Arc::clone(&stats)));
         }
     }
@@ -378,7 +392,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .bind(addr)
         .expect(format!("failed to bind to {:?}", addr).as_str());
 
-    let mut listener = TcpListener::from_std(listener.listen(128)?)?;
+    let mut listener =
+        TcpListener::from_std(listener.listen(128)?).expect("failed to listen on socket");
     info!("Listening on: {}", conf.listen_address);
 
     loop {

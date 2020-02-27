@@ -27,8 +27,26 @@ use request::{Address, Connection, Request, Version};
 
 enum HandshakeResult {
     Okay,
+    AuthenticatedAs(String),
     Failed,
     Version4([u8; 2]),
+}
+
+async fn authenticate_rfc1929(socket: &mut TcpStream) -> Result<Option<String>, tokio::io::Error> {
+    let mut buf = [0u8; 2];
+    socket.read_exact(&mut buf).await?;
+    // VER = 0x01
+    if buf[0] != 0x01 {
+        return Ok(None);
+    }
+    let mut username = vec![0u8; buf[1] as usize];
+    socket.read_exact(&mut username).await?;
+    let mut password_len = [0u8; 1];
+    socket.read_exact(&mut password_len).await?;
+    let mut password = vec![0u8; password_len[0] as usize];
+    socket.read_exact(&mut password).await?;
+    socket.write_all(&[0x1u8, 0x0u8]).await?;
+    return Ok(Some(String::from_utf8_lossy(&username).into_owned()));
 }
 
 async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio::io::Error> {
@@ -48,13 +66,23 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio
     }
     let mut auths = vec![0u8; num_auths as usize];
     socket.read_exact(&mut auths).await?;
-    if auths.iter().any(|&i| i == 0u8) {
-        socket.write_all(&[0x5u8, 0x00u8]).await?;
-        Ok(HandshakeResult::Okay)
-    } else {
-        socket.write_all(&[0x5u8, 0xffu8]).await?;
-        Ok(HandshakeResult::Failed)
+    auths.sort_by(|a, b| b.cmp(a));
+    for auth in auths {
+        if auth == 0u8 {
+            socket.write_all(&[0x5u8, 0x00u8]).await?;
+            return Ok(HandshakeResult::Okay);
+        } else if auth == 0x02u8 {
+            socket.write_all(&[0x5u8, 0x2u8]).await?;
+            if let Some(username) = authenticate_rfc1929(socket).await? {
+                return Ok(HandshakeResult::AuthenticatedAs(username));
+            } else {
+                warn!("1929 authentication failed; aborting");
+                socket.write_all(&[0x1u8, 0xffu8]).await?;
+            }
+        }
     }
+    socket.write_all(&[0x5u8, 0xffu8]).await?;
+    Ok(HandshakeResult::Failed)
 }
 
 #[derive(Debug, Display)]
@@ -188,6 +216,11 @@ async fn handle_one_connection(
     debug!("{}: accepted connection from {:?}", conn_id, address);
     let already_read = match handshake_auth(&mut socket).await? {
         HandshakeResult::Okay => None,
+        HandshakeResult::AuthenticatedAs(u) => {
+            stats.handshake_authenticated();
+            debug!("{}: authenticated as {:?}", conn_id, u);
+            None
+        }
         HandshakeResult::Failed => {
             stats.handshake_failed();
             debug!("{}: handshake failed", conn_id);

@@ -9,9 +9,6 @@ Features:
  - Specifying bind addresses for outgoing IPv4 and IPv6 sessions
  - Operational statistics via a domain socket or TCP socket
  - basic SOCKS4 and SOCKS4a support (username parameter is ignored)
-
-Not implemented:
-
- - Authentication (SOCKS5 only accepts anonymous handshakes)
+ - will accept any username+password authentication (and log the username)
 
 Check out [example.toml](example.toml) for an example of what the config file looks like.

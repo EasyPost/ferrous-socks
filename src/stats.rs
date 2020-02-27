@@ -35,6 +35,7 @@ impl Session {
 pub struct Stats {
     handshake_failed: AtomicU64,
     handshake_success: AtomicU64,
+    handshake_authenticated: AtomicU64,
     in_flight: AtomicU64,
     next_request_id: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
@@ -53,6 +54,7 @@ impl Stats {
         Stats {
             handshake_failed: AtomicU64::default(),
             handshake_success: AtomicU64::default(),
+            handshake_authenticated: AtomicU64::default(),
             in_flight: AtomicU64::default(),
             next_request_id: AtomicU64::new(1),
             sessions: RwLock::new(HashMap::new()),
@@ -61,6 +63,10 @@ impl Stats {
 
     pub fn handshake_failed(&self) {
         self.handshake_failed.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_authenticated(&self) {
+        self.handshake_authenticated.fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn handshake_success(&self) {

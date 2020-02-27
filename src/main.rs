@@ -50,12 +50,22 @@ async fn authenticate_rfc1929(socket: &mut TcpStream) -> Result<Option<String>, 
     Ok(Some(String::from_utf8_lossy(&username).into_owned()))
 }
 
+/// Perform the RFC1928 authentication handshake
+///
+/// Prerequisite: Nothing has been read from the socket yet
+///
+/// If returns HandshakeResult::Failed, the stream should be closed. Otherwise,
+/// we are (to some degree) authenticated.
 async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio::io::Error> {
+    // If this is SOCKS4, the first byte is 0x04 and the second byte is actually not part of the
+    // handshake. Oops!
     let mut init_buf = [0u8; 2];
     socket.read_exact(&mut init_buf).await?;
     if init_buf[0] == 0x04 {
         return Ok(HandshakeResult::Version4(init_buf));
     }
+    // If this is SOCKS5, the first byte is 0x05 and the second byte is the number of auth
+    // mechanisms supported
     if init_buf[0] != 0x05 {
         socket.write_all(&[0x05u8, 0xff]).await?;
         return Ok(HandshakeResult::Failed);
@@ -65,14 +75,18 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio
         socket.write_all(&[0x05u8, 0xff]).await?;
         return Ok(HandshakeResult::Failed);
     }
+    // Each auth mechanism is a single byte
     let mut auths = vec![0u8; num_auths as usize];
     socket.read_exact(&mut auths).await?;
+    // Try more sophisticated (higher-valued) auth mechanisms first
     auths.sort_by(|a, b| b.cmp(a));
     for auth in auths {
         if auth == 0u8 {
+            // 0x00 == unauthenticated. great
             socket.write_all(&[0x5u8, 0x00u8]).await?;
             return Ok(HandshakeResult::Okay);
         } else if auth == 0x02u8 {
+            // 0x02 = username+password auth as per RFC1929
             socket.write_all(&[0x5u8, 0x2u8]).await?;
             if let Some(username) = authenticate_rfc1929(socket).await? {
                 return Ok(HandshakeResult::AuthenticatedAs(username));
@@ -82,6 +96,7 @@ async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio
             }
         }
     }
+    // if we get here, we didn't have any supported auth mechainisms. oops.
     socket.write_all(&[0x5u8, 0xffu8]).await?;
     Ok(HandshakeResult::Failed)
 }
@@ -100,6 +115,7 @@ impl From<tokio::io::Error> for RequestError {
     }
 }
 
+/// Read a SOCKSv4 or SOCKSv5 request from the stream
 async fn read_request(
     socket: &mut TcpStream,
     already_read: Option<[u8; 2]>,
@@ -160,11 +176,11 @@ async fn read_request(
             } else {
                 Address::IpAddr(IpAddr::V4(ip_addr))
             };
-            Request::new_with_username(
+            Request::new(
                 address,
                 dport,
                 version,
-                String::from_utf8_lossy(&username).into_owned(),
+                Some(String::from_utf8_lossy(&username).into_owned()),
             )
         }
         Version::Five => {
@@ -191,7 +207,7 @@ async fn read_request(
             let mut port_buf = [0u8; 2];
             socket.read_exact(&mut port_buf).await?;
             let dport = NetworkEndian::read_u16(&port_buf);
-            Request::new(address, dport, version)
+            Request::new(address, dport, version, None)
         }
     };
     Ok(Some(request))

@@ -31,21 +31,12 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn new(address: Address, dport: u16, ver: Version) -> Self {
+    pub fn new(address: Address, dport: u16, ver: Version, username: Option<String>) -> Self {
         Request {
             address,
             dport,
             ver,
-            username: None,
-        }
-    }
-
-    pub fn new_with_username(address: Address, dport: u16, ver: Version, username: String) -> Self {
-        Request {
-            address,
-            dport,
-            ver,
-            username: Some(username),
+            username: username,
         }
     }
 

@@ -1,5 +1,4 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::time::Duration;
 
 use log::debug;
 use serde_derive::Serialize;
@@ -41,25 +40,24 @@ async fn connect_bind(
     bind_addr: IpAddr,
     connect_addr: IpAddr,
     connect_port: u16,
-    connect_timeout: Duration,
 ) -> Result<TcpStream, tokio::io::Error> {
     debug!("connecting with explicit bind of {:?}", bind_addr);
-    tokio::task::spawn_blocking(move || {
-        let connect = SocketAddr::new(connect_addr, connect_port).into();
-        let bind = SocketAddr::new(bind_addr, 0).into();
-        if bind_addr.is_ipv4() {
-            let socket = Socket::new(Domain::ipv4(), Type::stream(), None)?;
-            socket.bind(&bind)?;
-            socket.connect_timeout(&connect, connect_timeout)?;
-            TcpStream::from_std(socket.into_tcp_stream())
-        } else {
-            let socket = Socket::new(Domain::ipv6(), Type::stream(), None)?;
-            socket.bind(&bind)?;
-            socket.connect_timeout(&connect, connect_timeout)?;
-            TcpStream::from_std(socket.into_tcp_stream())
-        }
-    })
-    .await?
+    let connect = SocketAddr::new(connect_addr, connect_port).into();
+    let bind = SocketAddr::new(bind_addr, 0).into();
+    let stream = if bind_addr.is_ipv4() {
+        let socket = Socket::new(Domain::ipv4(), Type::stream(), None)?;
+        socket.bind(&bind)?;
+        // This method is undocumented but works
+        // see https://github.com/tokio-rs/mio/issues/1257 for details
+        TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?
+    } else {
+        let socket = Socket::new(Domain::ipv6(), Type::stream(), None)?;
+        socket.bind(&bind)?;
+        // This method is undocumented but works
+        // see https://github.com/tokio-rs/mio/issues/1257 for details
+        TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?
+    };
+    Ok(stream)
 }
 
 async fn connect_one(
@@ -71,7 +69,6 @@ async fn connect_one(
         if config.bind_addresses.is_empty() {
             Connection::Connected(TcpStream::connect((addr, port)).await?)
         } else {
-            let timeout = Duration::from_millis(config.connect_timeout_ms.into());
             for item in config.bind_addresses.iter() {
                 match (item.is_ipv4(), addr.is_ipv4()) {
                     (true, true) => {
@@ -81,7 +78,7 @@ async fn connect_one(
                             ));
                         } else {
                             return Ok(Connection::Connected(
-                                connect_bind(*item, addr, port, timeout).await?,
+                                connect_bind(*item, addr, port).await?,
                             ));
                         }
                     }
@@ -92,7 +89,7 @@ async fn connect_one(
                             ));
                         } else {
                             return Ok(Connection::Connected(
-                                connect_bind(*item, addr, port, timeout).await?,
+                                connect_bind(*item, addr, port).await?,
                             ));
                         }
                     }

@@ -4,8 +4,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::path::Path;
 
 use derive_more::Display;
-use ip_network::IpNetwork;
 use serde_derive::Deserialize;
+
+use crate::acl::{Acl, AclAction, AclItem};
 
 #[derive(Debug, Display)]
 pub enum ConfigError {
@@ -47,35 +48,7 @@ fn _default_connect_timeout_ms() -> u32 {
 }
 
 #[derive(Debug, Deserialize)]
-pub enum AclAction {
-    Allow,
-    Reject,
-}
-
-impl AclAction {
-    fn permitted(&self) -> bool {
-        match self {
-            AclAction::Allow => true,
-            AclAction::Reject => false,
-        }
-    }
-}
-
-impl Default for AclAction {
-    fn default() -> Self {
-        AclAction::Allow
-    }
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AclItem {
-    pub action: AclAction,
-    pub destination_network: Option<IpNetwork>,
-    pub destination_port: Option<u16>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Config {
+pub struct RawConfig {
     #[serde(alias = "listen-address")]
     pub listen_address: String,
     #[serde(alias = "bind-addresses", default = "_default_bind")]
@@ -95,26 +68,39 @@ pub struct Config {
     pub reuse_port: bool,
 }
 
-impl Config {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+impl RawConfig {
+    fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let mut f = File::open(path)?;
         let mut contents = String::new();
         f.read_to_string(&mut contents)?;
         let config = toml::from_str(contents.as_str())?;
         Ok(config)
     }
+}
 
-    pub fn is_permitted(&self, ip: IpAddr, dport: u16) -> bool {
-        for rule in self.acl.iter() {
-            let ip_match = rule
-                .destination_network
-                .map(|i| i.contains(ip))
-                .unwrap_or(true);
-            let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
-            if ip_match && port_match {
-                return rule.action.permitted();
-            }
-        }
-        self.acl_default_action.permitted()
+pub struct Config {
+    pub listen_address: String,
+    pub bind_addresses: Vec<IpAddr>,
+    pub acl: Acl,
+    pub connect_timeout_ms: u32,
+    pub total_timeout_ms: Option<u32>,
+    pub stats_socket_listen_address: Option<String>,
+    pub expect_proxy: bool,
+    pub reuse_port: bool,
+}
+
+impl Config {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+        let raw = RawConfig::from_path(path)?;
+        Ok(Config {
+            listen_address: raw.listen_address,
+            bind_addresses: raw.bind_addresses,
+            acl: Acl::from_parts(raw.acl, raw.acl_default_action),
+            connect_timeout_ms: raw.connect_timeout_ms,
+            total_timeout_ms: raw.total_timeout_ms,
+            stats_socket_listen_address: raw.stats_socket_listen_address,
+            expect_proxy: raw.expect_proxy,
+            reuse_port: raw.reuse_port,
+        })
     }
 }

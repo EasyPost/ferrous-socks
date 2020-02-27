@@ -61,7 +61,7 @@ async fn connect_one(
     port: u16,
     config: &Config,
 ) -> Result<Connection, tokio::io::Error> {
-    let conn = if config.is_permitted(addr, port) {
+    let conn = if config.acl.is_permitted(addr, port) {
         if config.bind_addresses.is_empty() {
             Connection::Connected(TcpStream::connect((addr, port)).await?)
         } else {

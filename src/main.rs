@@ -147,7 +147,6 @@ async fn read_request(
                 }
                 username.push(buf[0]);
             }
-            debug!("got SOCKSv4 connection from {:?}", username);
             let address = if ip_addr.octets()[0..3] == [0, 0, 0] {
                 let mut addr_buf = Vec::new();
                 loop {
@@ -161,7 +160,12 @@ async fn read_request(
             } else {
                 Address::IpAddr(IpAddr::V4(ip_addr))
             };
-            Request::new(address, dport, version)
+            Request::new_with_username(
+                address,
+                dport,
+                version,
+                String::from_utf8_lossy(&username).into_owned(),
+            )
         }
         Version::Five => {
             let address = match addr_type {
@@ -212,7 +216,6 @@ async fn handle_one_connection(
         HandshakeResult::Okay => None,
         HandshakeResult::AuthenticatedAs(u) => {
             stats.handshake_authenticated();
-            debug!("{}: authenticated as {:?}", conn_id, u);
             username = Some(u);
             None
         }
@@ -227,7 +230,12 @@ async fn handle_one_connection(
     debug!("{}: handshake succeeded", conn_id);
     let request = read_request(&mut socket, already_read).await?;
     if let Some(mut request) = request {
-        request.username = username;
+        request.set_username(username);
+        if let Some(ref u) = request.username {
+            debug!("{}: authenticated as {:?}", conn_id, u);
+        } else {
+            debug!("{}: unauthenticated", conn_id);
+        }
         let version = request.ver;
         stats.set_request(conn_id, &request).await;
         let mut conn = match tokio::time::timeout(

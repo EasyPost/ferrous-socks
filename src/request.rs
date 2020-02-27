@@ -39,6 +39,21 @@ impl Request {
             username: None,
         }
     }
+
+    pub fn new_with_username(address: Address, dport: u16, ver: Version, username: String) -> Self {
+        Request {
+            address,
+            dport,
+            ver,
+            username: Some(username),
+        }
+    }
+
+    pub fn set_username(&mut self, username: Option<String>) {
+        if username.is_some() {
+            self.username = username
+        }
+    }
 }
 
 pub enum Connection {

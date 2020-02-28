@@ -1,5 +1,7 @@
 This is a Rust implementation of a SOCKS5 server, similar to [socksyproxy](https://github.com/easypost/socksyproxy).
 
+[![Build Status](https://travis-ci.com/EasyPost/ferrous-socks.svg?branch=master)](https://travis-ci.com/EasyPost/ferrous-socks)
+
 Features:
 
  - High concurrency via [tokio](https://tokio.rs/)

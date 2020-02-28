@@ -5,6 +5,7 @@ use std::path::Path;
 
 use derive_more::Display;
 use serde_derive::Deserialize;
+use syslog;
 
 use crate::acl::{Acl, AclAction, AclItem};
 
@@ -47,6 +48,107 @@ fn _default_connect_timeout_ms() -> u32 {
     3000
 }
 
+#[derive(Debug, Deserialize, Clone, Copy)]
+#[allow(non_camel_case_types)]
+pub enum SyslogFacility {
+    KERN,
+    USER,
+    MAIL,
+    DAEMON,
+    AUTH,
+    SYSLOG,
+    LPR,
+    NEWS,
+    UUCP,
+    CRON,
+    AUTHPRIV,
+    FTP,
+    LOCAL0,
+    LOCAL1,
+    LOCAL2,
+    LOCAL3,
+    LOCAL4,
+    LOCAL5,
+    LOCAL6,
+    LOCAL7,
+}
+
+impl Into<syslog::Facility> for SyslogFacility {
+    fn into(self) -> syslog::Facility {
+        use syslog::Facility::*;
+        use SyslogFacility::*;
+
+        match self {
+            KERN => LOG_KERN,
+            USER => LOG_USER,
+            MAIL => LOG_MAIL,
+            DAEMON => LOG_DAEMON,
+            AUTH => LOG_AUTH,
+            SYSLOG => LOG_SYSLOG,
+            LPR => LOG_LPR,
+            NEWS => LOG_NEWS,
+            UUCP => LOG_UUCP,
+            CRON => LOG_CRON,
+            AUTHPRIV => LOG_AUTHPRIV,
+            FTP => LOG_FTP,
+            LOCAL0 => LOG_LOCAL0,
+            LOCAL1 => LOG_LOCAL1,
+            LOCAL2 => LOG_LOCAL2,
+            LOCAL3 => LOG_LOCAL3,
+            LOCAL4 => LOG_LOCAL4,
+            LOCAL5 => LOG_LOCAL5,
+            LOCAL6 => LOG_LOCAL6,
+            LOCAL7 => LOG_LOCAL7,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Copy, Clone)]
+#[allow(non_camel_case_types)]
+pub enum LogLevel {
+    ERROR,
+    WARN,
+    INFO,
+    DEBUG,
+    TRACE,
+}
+
+impl Default for LogLevel {
+    fn default() -> Self {
+        LogLevel::INFO
+    }
+}
+
+impl Into<log::LevelFilter> for LogLevel {
+    fn into(self) -> log::LevelFilter {
+        match self {
+            LogLevel::ERROR => log::LevelFilter::Error,
+            LogLevel::WARN => log::LevelFilter::Warn,
+            LogLevel::INFO => log::LevelFilter::Info,
+            LogLevel::DEBUG => log::LevelFilter::Debug,
+            LogLevel::TRACE => log::LevelFilter::Trace,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SyslogConfig {
+    pub facility: SyslogFacility,
+    #[serde(default)]
+    pub level: LogLevel,
+}
+
+impl SyslogConfig {
+    pub fn initialize_logging(&self) {
+        syslog::init(
+            self.facility.into(),
+            self.level.into(),
+            Some(env!("CARGO_PKG_NAME")),
+        )
+        .expect("failed to initialize syslog");
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct RawConfig {
     #[serde(alias = "listen-address")]
@@ -66,6 +168,7 @@ pub struct RawConfig {
     pub expect_proxy: bool,
     #[serde(alias = "reuse-port", default = "_false")]
     pub reuse_port: bool,
+    pub syslog: Option<SyslogConfig>,
 }
 
 impl RawConfig {
@@ -87,6 +190,7 @@ pub struct Config {
     pub stats_socket_listen_address: Option<String>,
     pub expect_proxy: bool,
     pub reuse_port: bool,
+    pub syslog_config: Option<SyslogConfig>,
 }
 
 impl Config {
@@ -101,6 +205,15 @@ impl Config {
             stats_socket_listen_address: raw.stats_socket_listen_address,
             expect_proxy: raw.expect_proxy,
             reuse_port: raw.reuse_port,
+            syslog_config: raw.syslog,
         })
+    }
+
+    pub fn initialize_logging(&self) {
+        if let Some(ref c) = self.syslog_config {
+            c.initialize_logging()
+        } else {
+            env_logger::init()
+        }
     }
 }

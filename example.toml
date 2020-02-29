@@ -37,3 +37,9 @@ acl-default-action = "Reject"
 expect-proxy = false
 # whether or not to set SO_REUSEPORT on supported platforms
 reuse-port = false
+
+# if this section isn't present, then we use env_logger and log to stderr
+# obeying the $RUST_LOG environment variable
+#[syslog]
+#facility = "KERN"
+#level = "DEBUG"

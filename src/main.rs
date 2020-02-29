@@ -299,7 +299,7 @@ async fn handle_one_connection(
         };
         let remote_end = conn.peer_addr()?;
         let local_end = conn.local_addr()?;
-        debug!(
+        info!(
             "{}: connected to {:?} from {:?}",
             conn_id, remote_end, local_end
         );
@@ -369,7 +369,7 @@ async fn handle_one_connection_wrapper(
             Err(e) => error!("error handling session {}: {:?}", conn_id, e),
         }
     }
-    debug!("finishing request");
+    info!("{}: finishing request", conn_id);
     stats.finish_request(conn_id).await;
 }
 
@@ -390,9 +390,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         )
         .get_matches();
 
-    env_logger::init();
-
     let conf = Arc::new(Config::from_path(matches.value_of("config").unwrap())?);
+
+    conf.initialize_logging();
 
     let stats = Arc::new(stats::Stats::new());
 

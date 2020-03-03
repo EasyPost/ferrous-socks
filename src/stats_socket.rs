@@ -1,3 +1,5 @@
+use std::os::unix::fs::FileTypeExt;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -7,6 +9,24 @@ use tokio::net::TcpListener;
 use tokio::net::UnixListener;
 
 use crate::stats::Stats;
+
+/// Bind a listening UNIX domain socket at /foo/bar by first
+/// binding to /foo/bar.pid and atomically renaming to /foo/bar
+pub fn bind_unix_listener<P: AsRef<Path>>(path: P) -> tokio::io::Result<UnixListener> {
+    let mut path_buf = path.as_ref().to_owned();
+    let orig_path_buf = path_buf.clone();
+    if let Ok(metadata) = std::fs::metadata(&path_buf) {
+        if !metadata.file_type().is_socket() {
+            panic!(format!("pre-existing non-socket file at {:?}", path_buf));
+        }
+    }
+    let mut target_file_name = path_buf.file_name().unwrap().to_owned();
+    target_file_name.push(format!(".{}", std::process::id()));
+    path_buf.set_file_name(target_file_name);
+    let listener = UnixListener::bind(&path_buf)?;
+    std::fs::rename(path_buf, orig_path_buf)?;
+    Ok(listener)
+}
 
 async fn handle_stats_connection<S>(
     mut socket: S,

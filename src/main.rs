@@ -397,8 +397,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let stats = Arc::new(stats::Stats::new());
 
     if let Some(ref stats_socket_listen_address) = conf.stats_socket_listen_address {
-        if stats_socket_listen_address.starts_with('/') {
-            let listener = tokio::net::UnixListener::bind(stats_socket_listen_address).expect(
+        if stats_socket_listen_address.starts_with('/')
+            || stats_socket_listen_address.starts_with('.')
+        {
+            let listener = stats_socket::bind_unix_listener(stats_socket_listen_address).expect(
                 format!(
                     "failed to bind to domain socket {:?}",
                     stats_socket_listen_address

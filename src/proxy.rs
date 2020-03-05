@@ -1,3 +1,4 @@
+use log::error;
 use std::error::Error;
 use std::io::Cursor;
 use std::net::{IpAddr, SocketAddr};
@@ -60,9 +61,7 @@ pub(crate) async fn read_proxy_header(
     socket: &mut TcpStream,
     address: SocketAddr,
 ) -> Result<ProxyHeader, HeaderError> {
-    println!("about to read header");
     let mut fixed_header = [0u8; 16];
-    println!("read header: {:?}", fixed_header);
     socket.read_exact(&mut fixed_header).await?;
     if fixed_header[..12] != *b"\x0D\x0A\x0D\x0A\x00\x0D\x0A\x51\x55\x49\x54\x0A" {
         return Err(HeaderError::InvalidMagicBytes);
@@ -100,12 +99,12 @@ pub(crate) async fn read_proxy_header(
     dbg!(&transport);
     let source_address = match family {
         Family::Unix => {
-            eprintln!("remaining data is {}", remaining_len);
+            error!("remaining data is {}", remaining_len);
             address
         }
         Family::Inet => {
             if remaining_len != 12 {
-                eprintln!("expected 96 bytes of address; got {:?}", remaining_len);
+                error!("expected 96 bytes of address; got {:?}", remaining_len);
                 return Err(HeaderError::InvalidVarData(remaining_len));
             }
             let mut buf = [0u8; 12];

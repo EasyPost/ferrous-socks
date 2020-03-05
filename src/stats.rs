@@ -36,6 +36,9 @@ pub struct Stats {
     handshake_failed: AtomicU64,
     handshake_success: AtomicU64,
     handshake_authenticated: AtomicU64,
+    handshake_timeout: AtomicU64,
+    session_success: AtomicU64,
+    session_timeout: AtomicU64,
     in_flight: AtomicU64,
     next_request_id: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
@@ -45,6 +48,9 @@ pub struct Stats {
 pub struct DumpableStats<'a> {
     handshake_failed: u64,
     handshake_success: u64,
+    handshake_timeout: u64,
+    session_success: u64,
+    session_timeout: u64,
     in_flight: u64,
     sessions: &'a HashMap<u64, Session>,
 }
@@ -55,6 +61,9 @@ impl Stats {
             handshake_failed: AtomicU64::default(),
             handshake_success: AtomicU64::default(),
             handshake_authenticated: AtomicU64::default(),
+            handshake_timeout: AtomicU64::default(),
+            session_success: AtomicU64::default(),
+            session_timeout: AtomicU64::default(),
             in_flight: AtomicU64::default(),
             next_request_id: AtomicU64::new(1),
             sessions: RwLock::new(HashMap::new()),
@@ -71,6 +80,18 @@ impl Stats {
 
     pub fn handshake_success(&self) {
         self.handshake_success.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn handshake_timeout(&self) {
+        self.handshake_timeout.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn session_success(&self) {
+        self.session_success.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn session_timeout(&self) {
+        self.session_timeout.fetch_add(1, Ordering::Relaxed);
     }
 
     pub async fn start_request(&self, source_address: SocketAddr) -> u64 {
@@ -99,6 +120,9 @@ impl Stats {
         let buf = DumpableStats {
             handshake_failed: self.handshake_failed.load(Ordering::Relaxed),
             handshake_success: self.handshake_success.load(Ordering::Relaxed),
+            handshake_timeout: self.handshake_timeout.load(Ordering::Relaxed),
+            session_success: self.session_success.load(Ordering::Relaxed),
+            session_timeout: self.session_timeout.load(Ordering::Relaxed),
             in_flight: self.in_flight.load(Ordering::Relaxed),
             sessions: &*lock,
         };

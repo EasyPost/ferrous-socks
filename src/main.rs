@@ -294,6 +294,7 @@ async fn handle_one_connection(
             Err(e) => {
                 warn!("{}: timeout connecting: {:?}", conn_id, e);
                 Reply::TtlExpired.write_error(&mut socket, version).await?;
+                stats.handshake_timeout();
                 return Ok(false);
             }
         };
@@ -359,9 +360,14 @@ async fn handle_one_connection_wrapper(
         )
         .await
         {
-            Ok(Ok(_)) => (),
+            Ok(Ok(_)) => {
+                stats.session_success();
+            }
             Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
-            Err(_) => eprintln!("session {} timed out!", conn_id),
+            Err(_) => {
+                warn!("session {} timed out!", conn_id);
+                stats.session_timeout();
+            }
         }
     } else {
         match handle_one_connection(socket, address, config, &stats, conn_id).await {

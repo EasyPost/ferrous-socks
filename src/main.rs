@@ -310,7 +310,7 @@ async fn handle_one_connection(
                     .write_all(&[
                         0x05,
                         0x00,
-                        0x01,
+                        0x00,
                         match local_end {
                             SocketAddr::V4(_) => 0x01,
                             SocketAddr::V6(_) => 0x04,

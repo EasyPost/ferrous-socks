@@ -140,12 +140,6 @@ async fn read_request(
             return Ok(None);
         }
     };
-    if cmd != 0x01 {
-        Reply::CommandNotSupported
-            .write_error(socket, Version::Five)
-            .await?;
-        return Ok(None);
-    }
     let request = match version {
         Version::Four => {
             let mut buf = [0u8; 6];
@@ -210,6 +204,12 @@ async fn read_request(
             Request::new(address, dport, version, None)
         }
     };
+    if cmd != 0x01 {
+        Reply::CommandNotSupported
+            .write_error(socket, Version::Five)
+            .await?;
+        return Ok(None);
+    }
     Ok(Some(request))
 }
 

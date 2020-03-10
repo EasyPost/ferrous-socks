@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::Read;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::Path;
 
 use derive_more::Display;
@@ -150,9 +150,62 @@ impl SyslogConfig {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum ListenAddress {
+    One(SocketAddr),
+    Several(Vec<SocketAddr>),
+}
+
+pub struct ListenAddressIter<'t> {
+    inner: &'t ListenAddress,
+    offset: usize,
+    size: usize,
+}
+
+impl<'t> ListenAddressIter<'t> {
+    fn new(inner: &'t ListenAddress) -> ListenAddressIter<'t> {
+        ListenAddressIter {
+            inner,
+            offset: 0,
+            size: match inner {
+                ListenAddress::One(_) => 1,
+                ListenAddress::Several(s) => s.len(),
+            },
+        }
+    }
+}
+
+impl<'t> Iterator for ListenAddressIter<'t> {
+    type Item = &'t SocketAddr;
+
+    fn next(&mut self) -> Option<&'t SocketAddr> {
+        if self.offset >= self.size {
+            None
+        } else {
+            self.offset += 1;
+            match self.inner {
+                ListenAddress::Several(v) => Some(&v[self.offset - 1]),
+                ListenAddress::One(i) => Some(i),
+            }
+        }
+    }
+}
+
+impl ListenAddress {
+    pub fn iter(&self) -> ListenAddressIter {
+        ListenAddressIter::new(self)
+    }
+
+    pub fn is_ipv6(&self) -> bool {
+        self.iter().any(SocketAddr::is_ipv6)
+    }
+}
+
+#[derive(Debug, Deserialize)]
 pub struct RawConfig {
     #[serde(alias = "listen-address")]
-    pub listen_address: String,
+    #[serde(alias = "listen-addresses")]
+    pub listen_address: ListenAddress,
     #[serde(alias = "bind-addresses", default = "_default_bind")]
     pub bind_addresses: Vec<IpAddr>,
     pub acl: Vec<AclItem>,
@@ -182,7 +235,7 @@ impl RawConfig {
 }
 
 pub struct Config {
-    pub listen_address: String,
+    pub listen_address: ListenAddress,
     pub bind_addresses: Vec<IpAddr>,
     pub acl: Acl,
     pub connect_timeout_ms: u32,

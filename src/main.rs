@@ -26,6 +26,8 @@ use config::Config;
 use reply::Reply;
 use request::{Address, Connection, Request, Version};
 
+const LISTEN_BACKLOG: i32 = 128;
+
 enum HandshakeResult {
     Okay,
     AuthenticatedAs(String),
@@ -428,12 +430,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let addr: SocketAddr = conf
-        .listen_address
-        .parse()
-        .expect("listen_address should parse as a socket address");
-
-    let listener = if addr.is_ipv6() {
+    let listener = if conf.listen_address.is_ipv6() {
         TcpBuilder::new_v6().expect("failed to create IPv6 socket")
     } else {
         TcpBuilder::new_v4().expect("failed to create IPv4 socket")
@@ -442,7 +439,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .reuse_address(true)
         .expect("failed to set SO_REUSEADDR");
 
-    let listener = if addr.is_ipv6() {
+    let listener = if conf.listen_address.is_ipv6() {
         listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
     } else {
         listener
@@ -453,13 +450,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .reuse_port(conf.reuse_port)
         .expect("failed to set SO_REUSEPORT");
 
-    let listener = listener
-        .bind(addr)
-        .expect(format!("failed to bind to {:?}", addr).as_str());
+    let listener = conf.listen_address.iter().fold(listener, |l, addr| {
+        let l = l
+            .bind(addr)
+            .expect(format!("failed to bind to {:?}", addr).as_str());
+        info!("Listening on: {}", addr);
+        l
+    });
 
-    let mut listener =
-        TcpListener::from_std(listener.listen(128)?).expect("failed to listen on socket");
-    info!("Listening on: {}", conf.listen_address);
+    let mut listener = TcpListener::from_std(listener.listen(LISTEN_BACKLOG)?)
+        .expect("failed to listen on socket");
 
     loop {
         let (socket, address) = listener.accept().await?;

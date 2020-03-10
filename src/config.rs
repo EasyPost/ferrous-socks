@@ -195,10 +195,6 @@ impl ListenAddress {
     pub fn iter(&self) -> ListenAddressIter {
         ListenAddressIter::new(self)
     }
-
-    pub fn is_ipv6(&self) -> bool {
-        self.iter().any(SocketAddr::is_ipv6)
-    }
 }
 
 #[derive(Debug, Deserialize)]

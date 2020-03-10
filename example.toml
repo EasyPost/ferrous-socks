@@ -27,8 +27,8 @@ acl = [
     {destination_network = "10.0.0.0/8", action="Reject"},
     {destination_network = "fc00::/7", action="Reject"},
     {destination_network = "fe80::/10", action="Reject"},
-    {destination_network = "127.0.0.0/8", action="Reject"},
-    {destination_network = "::1/128", action="Reject"},
+#    {destination_network = "127.0.0.0/8", action="Reject"},
+#    {destination_network = "::1/128", action="Reject"},
     {destination_port = 443, action = "Allow"},
     {destination_port = 80, action = "Allow"},
     {destination_port = 22, action = "Allow"},
@@ -36,7 +36,7 @@ acl = [
     {username = "backdoor", action = "Allow"},
 ]
 # if no rules in the ACL match, this rule is applied
-acl-default-action = "Reject"
+acl-default-action = "Allow"
 # whether or not to expect the PROXY protocol
 expect-proxy = false
 # whether or not to set SO_REUSEPORT on supported platforms

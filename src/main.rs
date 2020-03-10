@@ -7,6 +7,7 @@ use std::time::Duration;
 use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
 use derive_more::Display;
+use futures::stream::StreamExt;
 use log::{debug, error, info, warn};
 use net2::unix::UnixTcpBuilderExt;
 use net2::TcpBuilder;
@@ -381,6 +382,23 @@ async fn handle_one_connection_wrapper(
     stats.finish_request(conn_id).await;
 }
 
+async fn handle_connections(
+    mut listener: TcpListener,
+    conf: Arc<Config>,
+    stats: Arc<stats::Stats>,
+) -> Result<(), tokio::io::Error> {
+    loop {
+        let (socket, address) = listener.accept().await?;
+
+        let my_config = Arc::clone(&conf);
+        let my_stats = Arc::clone(&stats);
+
+        tokio::spawn(handle_one_connection_wrapper(
+            socket, address, my_config, my_stats,
+        ));
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let matches = clap::App::new(env!("CARGO_PKG_NAME"))
@@ -430,45 +448,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let listener = if conf.listen_address.is_ipv6() {
-        TcpBuilder::new_v6().expect("failed to create IPv6 socket")
-    } else {
-        TcpBuilder::new_v4().expect("failed to create IPv4 socket")
-    };
-    let listener = listener
-        .reuse_address(true)
-        .expect("failed to set SO_REUSEADDR");
+    let listen_results = conf
+        .listen_address
+        .iter()
+        .map(|addr| {
+            let listener = if addr.is_ipv6() {
+                TcpBuilder::new_v6().expect("failed to create IPv6 socket")
+            } else {
+                TcpBuilder::new_v4().expect("failed to create IPv4 socket")
+            };
+            let listener = listener
+                .reuse_address(true)
+                .expect("failed to set SO_REUSEADDR");
 
-    let listener = if conf.listen_address.is_ipv6() {
-        listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
-    } else {
-        listener
-    };
+            let listener = if addr.is_ipv6() {
+                listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
+            } else {
+                listener
+            };
 
-    #[cfg(all(unix, not(any(target_os = "solaris"))))]
-    let listener = listener
-        .reuse_port(conf.reuse_port)
-        .expect("failed to set SO_REUSEPORT");
+            #[cfg(all(unix, not(any(target_os = "solaris"))))]
+            let listener = listener
+                .reuse_port(conf.reuse_port)
+                .expect("failed to set SO_REUSEPORT")
+                .bind(addr)
+                .expect(format!("failed to bind to {:?}", addr).as_str());
+            info!("Listening on: {}", addr);
 
-    let listener = conf.listen_address.iter().fold(listener, |l, addr| {
-        let l = l
-            .bind(addr)
-            .expect(format!("failed to bind to {:?}", addr).as_str());
-        info!("Listening on: {}", addr);
-        l
-    });
-
-    let mut listener = TcpListener::from_std(listener.listen(LISTEN_BACKLOG)?)
-        .expect("failed to listen on socket");
-
-    loop {
-        let (socket, address) = listener.accept().await?;
-
-        let my_config = Arc::clone(&conf);
-        let my_stats = Arc::clone(&stats);
-
-        tokio::spawn(handle_one_connection_wrapper(
-            socket, address, my_config, my_stats,
-        ));
-    }
+            TcpListener::from_std(
+                listener
+                    .listen(LISTEN_BACKLOG)
+                    .expect("failed to listen on socket"),
+            )
+            .expect("failed to map sync socket to async socket")
+        })
+        .map(|listener| {
+            let listener_config = Arc::clone(&conf);
+            let listener_stats = Arc::clone(&stats);
+            tokio::spawn(handle_connections(
+                listener,
+                listener_config,
+                listener_stats,
+            ))
+        })
+        .collect::<futures::stream::FuturesUnordered<_>>()
+        .collect::<Vec<_>>()
+        .await;
+    info!("listen results: {:?}", listen_results);
+    Ok(())
 }

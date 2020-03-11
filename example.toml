@@ -1,8 +1,6 @@
 # this is the address to listen on for incoming sesions; you can also pass a list of addresses
-listen-address = [
-    "[::1]:1080",
-    "[::1]:10080",
-]
+# using regular TOML [ ] list syntax.
+listen-address = "[::1]:1080"
 
 # this is a list of addresses to bind to for outgoing connections. If not passed, it defaults to [0.0.0.0, ::].
 # if you don't pass any IPv4 addresses, IPv4 requests will be deined. Ditto for IPv6.
@@ -27,8 +25,8 @@ acl = [
     {destination_network = "10.0.0.0/8", action="Reject"},
     {destination_network = "fc00::/7", action="Reject"},
     {destination_network = "fe80::/10", action="Reject"},
-#    {destination_network = "127.0.0.0/8", action="Reject"},
-#    {destination_network = "::1/128", action="Reject"},
+    {destination_network = "127.0.0.0/8", action="Reject"},
+    {destination_network = "::1/128", action="Reject"},
     {destination_port = 443, action = "Allow"},
     {destination_port = 80, action = "Allow"},
     {destination_port = 22, action = "Allow"},
@@ -36,11 +34,11 @@ acl = [
     {username = "backdoor", action = "Allow"},
 ]
 # if no rules in the ACL match, this rule is applied
-acl-default-action = "Allow"
+acl-default-action = "Reject"
 # whether or not to expect the PROXY protocol
 expect-proxy = false
 # whether or not to set SO_REUSEPORT on supported platforms
-reuse-port = true
+reuse-port = false
 
 # if this section isn't present, then we use env_logger and log to stderr
 # obeying the $RUST_LOG environment variable

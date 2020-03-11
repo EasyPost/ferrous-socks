@@ -433,6 +433,9 @@ async fn handle_connections(
             }
         }
     }
+    // eagerly drop the stream to shut down the listening socket
+    drop(stream);
+    drop(listener);
     // this is cheesy. we should probably have something other than time-based
     // polling here.
     while outstanding.load(Ordering::Relaxed) != 0 {

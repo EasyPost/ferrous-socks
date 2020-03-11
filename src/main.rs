@@ -3,7 +3,7 @@ use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
@@ -438,7 +438,13 @@ async fn handle_connections(
     drop(listener);
     // this is cheesy. we should probably have something other than time-based
     // polling here.
+    let start_poll = Instant::now();
+    let expiration = Duration::from_millis(conf.shutdown_timeout_ms);
     while outstanding.load(Ordering::Relaxed) != 0 {
+        if start_poll.elapsed() > expiration {
+            warn!("giving up on outstanding sockets and exiting anyway!");
+            break;
+        }
         debug!("waiting for outstanding tasks to exit");
         tokio::time::delay_for(Duration::from_millis(500)).await;
     }

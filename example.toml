@@ -15,6 +15,8 @@ bind-addresses = [
 connect-timeout-ms = 3000
 # this timeout is applied to the entire request
 total-timeout-ms = 1800000
+# this timeout controls how long to wait for in-flight sessions after getting SIGTERM
+shutdown-timeout-ms = 10000
 # this address is listened to for stats requests. if it starts with /, it is a stream-mode UNIX domain socket;
 # otherwise, it is a TCP socket address
 stats-socket-listen-address = "[::1]:8081"

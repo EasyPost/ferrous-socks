@@ -44,10 +44,6 @@ fn _default_bind() -> Vec<IpAddr> {
     ]
 }
 
-fn _default_connect_timeout_ms() -> u32 {
-    3000
-}
-
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[allow(non_camel_case_types)]
 pub enum SyslogFacility {
@@ -207,10 +203,12 @@ pub struct RawConfig {
     pub acl: Vec<AclItem>,
     #[serde(alias = "acl-default-action")]
     pub acl_default_action: AclAction,
-    #[serde(alias = "connect-timeout-ms", default = "_default_connect_timeout_ms")]
-    pub connect_timeout_ms: u32,
+    #[serde(alias = "connect-timeout-ms")]
+    pub connect_timeout_ms: Option<u32>,
     #[serde(alias = "total-timeout-ms")]
     pub total_timeout_ms: Option<u32>,
+    #[serde(alias = "shutdown-timeout-ms")]
+    pub shutdown_timeout_ms: Option<u32>,
     #[serde(alias = "stats-socket-listen-address")]
     pub stats_socket_listen_address: Option<String>,
     #[serde(alias = "expect-proxy", default = "_false")]
@@ -236,6 +234,7 @@ pub struct Config {
     pub acl: Acl,
     pub connect_timeout_ms: u32,
     pub total_timeout_ms: Option<u32>,
+    pub shutdown_timeout_ms: u64,
     pub stats_socket_listen_address: Option<String>,
     pub expect_proxy: bool,
     pub reuse_port: bool,
@@ -249,8 +248,9 @@ impl Config {
             listen_address: raw.listen_address,
             bind_addresses: raw.bind_addresses,
             acl: Acl::from_parts(raw.acl, raw.acl_default_action),
-            connect_timeout_ms: raw.connect_timeout_ms,
+            connect_timeout_ms: raw.connect_timeout_ms.unwrap_or(10_000),
             total_timeout_ms: raw.total_timeout_ms,
+            shutdown_timeout_ms: u64::from(raw.shutdown_timeout_ms.unwrap_or(5_000)),
             stats_socket_listen_address: raw.stats_socket_listen_address,
             expect_proxy: raw.expect_proxy,
             reuse_port: raw.reuse_port,

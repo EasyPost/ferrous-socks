@@ -522,7 +522,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             #[cfg(all(unix, not(any(target_os = "solaris"))))]
             let listener = listener
                 .reuse_port(conf.reuse_port)
-                .expect("failed to set SO_REUSEPORT")
+                .expect("failed to set SO_REUSEPORT");
+
+            let listener = listener
                 .bind(addr)
                 .expect(format!("failed to bind to {:?}", addr).as_str());
             info!("Listening on: {}", addr);

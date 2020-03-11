@@ -1,18 +1,21 @@
 use std::env;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
 use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
 use derive_more::Display;
-use futures::stream::StreamExt;
+use futures::future::FutureExt;
 use log::{debug, error, info, warn};
 use net2::unix::UnixTcpBuilderExt;
 use net2::TcpBuilder;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
+use tokio::signal::unix::SignalKind;
+use tokio::stream::StreamExt;
 
 mod acl;
 mod config;
@@ -382,21 +385,61 @@ async fn handle_one_connection_wrapper(
     stats.finish_request(conn_id).await;
 }
 
+enum StreamResult {
+    Stream(TcpStream),
+    Signal,
+}
+
 async fn handle_connections(
     mut listener: TcpListener,
     conf: Arc<Config>,
     stats: Arc<stats::Stats>,
 ) -> Result<(), tokio::io::Error> {
-    loop {
-        let (socket, address) = listener.accept().await?;
+    let interrupt_signal_stream =
+        tokio::signal::unix::signal(SignalKind::interrupt())?.map(|_| StreamResult::Signal);
+    let term_signal_stream =
+        tokio::signal::unix::signal(SignalKind::terminate())?.map(|_| StreamResult::Signal);
 
-        let my_config = Arc::clone(&conf);
-        let my_stats = Arc::clone(&stats);
+    let mut stream = listener
+        .incoming()
+        .filter_map(|s| s.ok().map(|os| StreamResult::Stream(os)))
+        .merge(interrupt_signal_stream)
+        .merge(term_signal_stream);
 
-        tokio::spawn(handle_one_connection_wrapper(
-            socket, address, my_config, my_stats,
-        ));
+    let outstanding = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    while let Some(result) = stream.next().await {
+        match result {
+            StreamResult::Stream(socket) => {
+                let address = socket.peer_addr()?;
+
+                let my_config = Arc::clone(&conf);
+                let my_stats = Arc::clone(&stats);
+                let my_outstanding = Arc::clone(&outstanding);
+
+                my_outstanding.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(
+                    handle_one_connection_wrapper(socket, address, my_config, my_stats).map(
+                        move |r| {
+                            my_outstanding.fetch_sub(1, Ordering::SeqCst);
+                            r
+                        },
+                    ),
+                );
+            }
+            StreamResult::Signal => {
+                info!("got signal in listener");
+                break;
+            }
+        }
     }
+    // this is cheesy. we should probably have something other than time-based
+    // polling here.
+    while outstanding.load(Ordering::Relaxed) != 0 {
+        debug!("waiting for outstanding tasks to exit");
+        tokio::time::delay_for(Duration::from_millis(500)).await;
+    }
+    Ok(())
 }
 
 #[tokio::main]
@@ -483,12 +526,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .expect("failed to map sync socket to async socket")
         })
         .map(|listener| {
-            let listener_config = Arc::clone(&conf);
-            let listener_stats = Arc::clone(&stats);
             tokio::spawn(handle_connections(
                 listener,
-                listener_config,
-                listener_stats,
+                Arc::clone(&conf),
+                Arc::clone(&stats),
             ))
         })
         .collect::<futures::stream::FuturesUnordered<_>>()

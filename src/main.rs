@@ -466,9 +466,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .takes_value(true)
                 .required(true),
         )
+        .arg(
+            Arg::with_name("check-config")
+                .short("C")
+                .long("check-config")
+                .help("Only check config syntax and exit"),
+        )
         .get_matches();
 
     let conf = Arc::new(Config::from_path(matches.value_of("config").unwrap())?);
+
+    if matches.is_present("check-config") {
+        println!("Config loaded successfully");
+        return Ok(());
+    }
 
     conf.initialize_logging();
 

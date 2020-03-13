@@ -1,17 +1,21 @@
 use std::env;
 use std::error::Error;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
 use derive_more::Display;
+use futures::future::FutureExt;
 use log::{debug, error, info, warn};
 use net2::unix::UnixTcpBuilderExt;
 use net2::TcpBuilder;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::prelude::*;
+use tokio::signal::unix::SignalKind;
+use tokio::stream::StreamExt;
 
 mod acl;
 mod config;
@@ -25,6 +29,8 @@ mod util;
 use config::Config;
 use reply::Reply;
 use request::{Address, Connection, Request, Version};
+
+const LISTEN_BACKLOG: i32 = 128;
 
 enum HandshakeResult {
     Okay,
@@ -379,6 +385,72 @@ async fn handle_one_connection_wrapper(
     stats.finish_request(conn_id).await;
 }
 
+enum StreamResult {
+    Stream(TcpStream),
+    Signal,
+}
+
+async fn handle_connections(
+    mut listener: TcpListener,
+    conf: Arc<Config>,
+    stats: Arc<stats::Stats>,
+) -> Result<(), tokio::io::Error> {
+    let interrupt_signal_stream =
+        tokio::signal::unix::signal(SignalKind::interrupt())?.map(|_| StreamResult::Signal);
+    let term_signal_stream =
+        tokio::signal::unix::signal(SignalKind::terminate())?.map(|_| StreamResult::Signal);
+
+    let mut stream = listener
+        .incoming()
+        .filter_map(|s| s.ok().map(|os| StreamResult::Stream(os)))
+        .merge(interrupt_signal_stream)
+        .merge(term_signal_stream);
+
+    let outstanding = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    while let Some(result) = stream.next().await {
+        match result {
+            StreamResult::Stream(socket) => {
+                let address = socket.peer_addr()?;
+
+                let my_config = Arc::clone(&conf);
+                let my_stats = Arc::clone(&stats);
+                let my_outstanding = Arc::clone(&outstanding);
+
+                my_outstanding.fetch_add(1, Ordering::SeqCst);
+                tokio::spawn(
+                    handle_one_connection_wrapper(socket, address, my_config, my_stats).map(
+                        move |r| {
+                            my_outstanding.fetch_sub(1, Ordering::SeqCst);
+                            r
+                        },
+                    ),
+                );
+            }
+            StreamResult::Signal => {
+                info!("got signal in listener");
+                break;
+            }
+        }
+    }
+    // eagerly drop the stream to shut down the listening socket
+    drop(stream);
+    drop(listener);
+    // this is cheesy. we should probably have something other than time-based
+    // polling here.
+    let start_poll = Instant::now();
+    let expiration = Duration::from_millis(conf.shutdown_timeout_ms);
+    while outstanding.load(Ordering::Relaxed) != 0 {
+        if start_poll.elapsed() > expiration {
+            warn!("giving up on outstanding sockets and exiting anyway!");
+            break;
+        }
+        debug!("waiting for outstanding tasks to exit");
+        tokio::time::delay_for(Duration::from_millis(500)).await;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let matches = clap::App::new(env!("CARGO_PKG_NAME"))
@@ -428,47 +500,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let addr: SocketAddr = conf
+    let listen_results = conf
         .listen_address
-        .parse()
-        .expect("listen_address should parse as a socket address");
+        .iter()
+        .map(|addr| {
+            let listener = if addr.is_ipv6() {
+                TcpBuilder::new_v6().expect("failed to create IPv6 socket")
+            } else {
+                TcpBuilder::new_v4().expect("failed to create IPv4 socket")
+            };
+            let listener = listener
+                .reuse_address(true)
+                .expect("failed to set SO_REUSEADDR");
 
-    let listener = if addr.is_ipv6() {
-        TcpBuilder::new_v6().expect("failed to create IPv6 socket")
-    } else {
-        TcpBuilder::new_v4().expect("failed to create IPv4 socket")
-    };
-    let listener = listener
-        .reuse_address(true)
-        .expect("failed to set SO_REUSEADDR");
+            let listener = if addr.is_ipv6() {
+                listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
+            } else {
+                listener
+            };
 
-    let listener = if addr.is_ipv6() {
-        listener.only_v6(false).expect("failed to set IPV6_V6ONLY")
-    } else {
-        listener
-    };
+            #[cfg(all(unix, not(any(target_os = "solaris"))))]
+            let listener = listener
+                .reuse_port(conf.reuse_port)
+                .expect("failed to set SO_REUSEPORT");
 
-    #[cfg(all(unix, not(any(target_os = "solaris"))))]
-    let listener = listener
-        .reuse_port(conf.reuse_port)
-        .expect("failed to set SO_REUSEPORT");
+            let listener = listener
+                .bind(addr)
+                .expect(format!("failed to bind to {:?}", addr).as_str());
+            info!("Listening on: {}", addr);
 
-    let listener = listener
-        .bind(addr)
-        .expect(format!("failed to bind to {:?}", addr).as_str());
-
-    let mut listener =
-        TcpListener::from_std(listener.listen(128)?).expect("failed to listen on socket");
-    info!("Listening on: {}", conf.listen_address);
-
-    loop {
-        let (socket, address) = listener.accept().await?;
-
-        let my_config = Arc::clone(&conf);
-        let my_stats = Arc::clone(&stats);
-
-        tokio::spawn(handle_one_connection_wrapper(
-            socket, address, my_config, my_stats,
-        ));
-    }
+            TcpListener::from_std(
+                listener
+                    .listen(LISTEN_BACKLOG)
+                    .expect("failed to listen on socket"),
+            )
+            .expect("failed to map sync socket to async socket")
+        })
+        .map(|listener| {
+            tokio::spawn(handle_connections(
+                listener,
+                Arc::clone(&conf),
+                Arc::clone(&stats),
+            ))
+        })
+        .collect::<futures::stream::FuturesUnordered<_>>()
+        .collect::<Vec<_>>()
+        .await;
+    info!("listen results: {:?}", listen_results);
+    Ok(())
 }

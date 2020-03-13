@@ -9,7 +9,7 @@ pub enum AclAction {
 }
 
 impl AclAction {
-    pub fn permitted(&self) -> bool {
+    pub fn permitted(self) -> bool {
         match self {
             AclAction::Allow => true,
             AclAction::Reject => false,

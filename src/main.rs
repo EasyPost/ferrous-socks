@@ -402,7 +402,7 @@ async fn handle_connections(
 
     let mut stream = listener
         .incoming()
-        .filter_map(|s| s.ok().map(|os| StreamResult::Stream(os)))
+        .filter_map(|s| s.ok().map(StreamResult::Stream))
         .merge(interrupt_signal_stream)
         .merge(term_signal_stream);
 

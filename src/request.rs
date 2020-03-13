@@ -36,7 +36,7 @@ impl Request {
             address,
             dport,
             ver,
-            username: username,
+            username,
         }
     }
 

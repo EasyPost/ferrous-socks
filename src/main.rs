@@ -266,37 +266,40 @@ async fn handle_one_connection(
         )
         .await
         {
-            Ok(c) => match c {
-                Ok(Connection::Connected(c)) => c,
-                Ok(Connection::ConnectionNotAllowed) => {
-                    warn!("{}: denying connection to {:?}", conn_id, request);
-                    Reply::ConnectionNotAllowed
-                        .write_error(&mut socket, version)
-                        .await?;
-                    return Ok(false);
+            Ok(c) => {
+                stats.record_connection(&c);
+                match c {
+                    Ok(Connection::Connected(c)) => c,
+                    Ok(Connection::ConnectionNotAllowed) => {
+                        warn!("{}: denying connection to {:?}", conn_id, request);
+                        Reply::ConnectionNotAllowed
+                            .write_error(&mut socket, version)
+                            .await?;
+                        return Ok(false);
+                    }
+                    Ok(Connection::AddressNotSupported) => {
+                        warn!("{}: bad address family to to {:?}", conn_id, request);
+                        Reply::AddressNotSupported
+                            .write_error(&mut socket, version)
+                            .await?;
+                        return Ok(false);
+                    }
+                    Ok(Connection::SocksFailure) => {
+                        warn!("{}: failure (resolution?) to {:?}", conn_id, request);
+                        Reply::SocksFailure
+                            .write_error(&mut socket, version)
+                            .await?;
+                        return Ok(false);
+                    }
+                    Err(e) => {
+                        Reply::NetworkUnreachable
+                            .write_error(&mut socket, version)
+                            .await?;
+                        warn!("error connecting: {:?}", e);
+                        return Ok(false);
+                    }
                 }
-                Ok(Connection::AddressNotSupported) => {
-                    warn!("{}: bad address family to to {:?}", conn_id, request);
-                    Reply::AddressNotSupported
-                        .write_error(&mut socket, version)
-                        .await?;
-                    return Ok(false);
-                }
-                Ok(Connection::SocksFailure) => {
-                    warn!("{}: failure (resolution?) to {:?}", conn_id, request);
-                    Reply::SocksFailure
-                        .write_error(&mut socket, version)
-                        .await?;
-                    return Ok(false);
-                }
-                Err(e) => {
-                    Reply::NetworkUnreachable
-                        .write_error(&mut socket, version)
-                        .await?;
-                    warn!("error connecting: {:?}", e);
-                    return Ok(false);
-                }
-            },
+            }
             Err(e) => {
                 warn!("{}: timeout connecting: {:?}", conn_id, e);
                 Reply::TtlExpired.write_error(&mut socket, version).await?;
@@ -369,7 +372,10 @@ async fn handle_one_connection_wrapper(
             Ok(Ok(_)) => {
                 stats.session_success();
             }
-            Ok(Err(e)) => error!("error handling session {}: {:?}", conn_id, e),
+            Ok(Err(e)) => {
+                stats.session_error();
+                error!("error handling session {}: {:?}", conn_id, e);
+            }
             Err(_) => {
                 warn!("session {} timed out!", conn_id);
                 stats.session_timeout();
@@ -377,8 +383,13 @@ async fn handle_one_connection_wrapper(
         }
     } else {
         match handle_one_connection(socket, address, config, &stats, conn_id).await {
-            Ok(_) => (),
-            Err(e) => error!("error handling session {}: {:?}", conn_id, e),
+            Ok(_) => {
+                stats.session_success();
+            }
+            Err(e) => {
+                stats.session_error();
+                error!("error handling session {}: {:?}", conn_id, e);
+            }
         }
     }
     info!("{}: finishing request", conn_id);

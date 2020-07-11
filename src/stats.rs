@@ -6,8 +6,27 @@ use std::time::SystemTime;
 use serde_derive::Serialize;
 use tokio::sync::RwLock;
 
-use crate::request::Request;
+use crate::request::{Connection, Request};
 use crate::util::serialize_system_time;
+
+trait StatIncrement {
+    type BaseType;
+
+    fn stat_increment(&self);
+    fn load_stat(&self) -> Self::BaseType;
+}
+
+impl StatIncrement for AtomicU64 {
+    type BaseType = u64;
+
+    fn stat_increment(&self) {
+        self.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn load_stat(&self) -> u64 {
+        self.load(Ordering::Relaxed)
+    }
+}
 
 #[derive(Debug, Serialize)]
 pub struct Session {
@@ -38,7 +57,13 @@ pub struct Stats {
     handshake_authenticated: AtomicU64,
     handshake_timeout: AtomicU64,
     session_success: AtomicU64,
+    session_error: AtomicU64,
     session_timeout: AtomicU64,
+    connection_connected: AtomicU64,
+    connection_not_allowed: AtomicU64,
+    connection_address_not_supported: AtomicU64,
+    connection_socks_failure: AtomicU64,
+    connection_network_unreachable: AtomicU64,
     in_flight: AtomicU64,
     next_request_id: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
@@ -50,7 +75,13 @@ pub struct DumpableStats<'a> {
     handshake_success: u64,
     handshake_timeout: u64,
     session_success: u64,
+    session_error: u64,
     session_timeout: u64,
+    connection_connected: u64,
+    connection_not_allowed: u64,
+    connection_address_not_supported: u64,
+    connection_socks_failure: u64,
+    connection_network_unreachable: u64,
     in_flight: u64,
     sessions: &'a HashMap<u64, Session>,
 }
@@ -64,6 +95,12 @@ impl Stats {
             handshake_timeout: AtomicU64::default(),
             session_success: AtomicU64::default(),
             session_timeout: AtomicU64::default(),
+            session_error: AtomicU64::default(),
+            connection_connected: AtomicU64::default(),
+            connection_not_allowed: AtomicU64::default(),
+            connection_address_not_supported: AtomicU64::default(),
+            connection_socks_failure: AtomicU64::default(),
+            connection_network_unreachable: AtomicU64::default(),
             in_flight: AtomicU64::default(),
             next_request_id: AtomicU64::new(1),
             sessions: RwLock::new(HashMap::new()),
@@ -71,31 +108,47 @@ impl Stats {
     }
 
     pub fn handshake_failed(&self) {
-        self.handshake_failed.fetch_add(1, Ordering::Relaxed);
+        self.handshake_failed.stat_increment();
     }
 
     pub fn handshake_authenticated(&self) {
-        self.handshake_authenticated.fetch_add(1, Ordering::Relaxed);
+        self.handshake_authenticated.stat_increment();
     }
 
     pub fn handshake_success(&self) {
-        self.handshake_success.fetch_add(1, Ordering::Relaxed);
+        self.handshake_success.stat_increment();
     }
 
     pub fn handshake_timeout(&self) {
-        self.handshake_timeout.fetch_add(1, Ordering::Relaxed);
+        self.handshake_timeout.stat_increment();
     }
 
     pub fn session_success(&self) {
-        self.session_success.fetch_add(1, Ordering::Relaxed);
+        self.session_success.stat_increment();
+    }
+
+    pub fn session_error(&self) {
+        self.session_error.stat_increment();
     }
 
     pub fn session_timeout(&self) {
-        self.session_timeout.fetch_add(1, Ordering::Relaxed);
+        self.session_timeout.stat_increment();
+    }
+
+    pub fn record_connection(&self, c: &Result<Connection, ::std::io::Error>) {
+        match c {
+            Ok(Connection::Connected(_)) => self.connection_connected.stat_increment(),
+            Ok(Connection::AddressNotSupported) => {
+                self.connection_address_not_supported.stat_increment()
+            }
+            Ok(Connection::ConnectionNotAllowed) => self.connection_not_allowed.stat_increment(),
+            Ok(Connection::SocksFailure) => self.connection_socks_failure.stat_increment(),
+            Err(_) => self.connection_network_unreachable.stat_increment(),
+        }
     }
 
     pub async fn start_request(&self, source_address: SocketAddr) -> u64 {
-        self.in_flight.fetch_add(1, Ordering::Relaxed);
+        self.in_flight.stat_increment();
         let conn_id = self.next_request_id.fetch_add(1, Ordering::SeqCst);
         let mut lock = self.sessions.write().await;
         lock.insert(conn_id, Session::new(source_address));
@@ -118,12 +171,18 @@ impl Stats {
     pub async fn serialize_to_vec(&self) -> Result<Vec<u8>, serde_json::error::Error> {
         let lock = self.sessions.read().await;
         let buf = DumpableStats {
-            handshake_failed: self.handshake_failed.load(Ordering::Relaxed),
-            handshake_success: self.handshake_success.load(Ordering::Relaxed),
-            handshake_timeout: self.handshake_timeout.load(Ordering::Relaxed),
-            session_success: self.session_success.load(Ordering::Relaxed),
-            session_timeout: self.session_timeout.load(Ordering::Relaxed),
-            in_flight: self.in_flight.load(Ordering::Relaxed),
+            handshake_failed: self.handshake_failed.load_stat(),
+            handshake_success: self.handshake_success.load_stat(),
+            handshake_timeout: self.handshake_timeout.load_stat(),
+            session_success: self.session_success.load_stat(),
+            session_error: self.session_error.load_stat(),
+            session_timeout: self.session_timeout.load_stat(),
+            in_flight: self.in_flight.load_stat(),
+            connection_connected: self.connection_connected.load_stat(),
+            connection_address_not_supported: self.connection_address_not_supported.load_stat(),
+            connection_not_allowed: self.connection_not_allowed.load_stat(),
+            connection_socks_failure: self.connection_socks_failure.load_stat(),
+            connection_network_unreachable: self.connection_network_unreachable.load_stat(),
             sessions: &*lock,
         };
         serde_json::to_vec(&buf)

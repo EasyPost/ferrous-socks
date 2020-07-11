@@ -278,7 +278,7 @@ async fn handle_one_connection(
                         return Ok(false);
                     }
                     Ok(Connection::AddressNotSupported) => {
-                        warn!("{}: bad address family to to {:?}", conn_id, request);
+                        warn!("{}: bad address family to {:?}", conn_id, request);
                         Reply::AddressNotSupported
                             .write_error(&mut socket, version)
                             .await?;

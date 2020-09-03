@@ -20,6 +20,9 @@ shutdown-timeout-ms = 10000
 # this address is listened to for stats requests. if it starts with /, it is a stream-mode UNIX domain socket;
 # otherwise, it is a TCP socket address
 stats-socket-listen-address = "[::1]:8081"
+# you can pass the mode if the stats socket address is a stream-mode domain socket; it's ignored
+# if the address is a TCP socket address
+stats-socket-mode = 0o666
 # this ACL is evaluated sequentially; the first rule that maches has its action applied
 acl = [
     {destination_network = "192.168.0.0/16", action="Reject"},

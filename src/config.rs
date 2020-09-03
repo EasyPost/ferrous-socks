@@ -1,6 +1,8 @@
 use std::fs::File;
+use std::fs::Permissions;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use derive_more::Display;
@@ -42,6 +44,10 @@ fn _default_bind() -> Vec<IpAddr> {
         IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
         IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0)),
     ]
+}
+
+fn _default_mode() -> u32 {
+    0o600
 }
 
 #[derive(Debug, Deserialize, Clone, Copy)]
@@ -211,6 +217,8 @@ pub struct RawConfig {
     pub shutdown_timeout_ms: Option<u32>,
     #[serde(alias = "stats-socket-listen-address")]
     pub stats_socket_listen_address: Option<String>,
+    #[serde(alias = "stats-socket-mode", default = "_default_mode")]
+    pub stats_socket_mode: u32,
     #[serde(alias = "expect-proxy", default = "_false")]
     pub expect_proxy: bool,
     #[serde(alias = "reuse-port", default = "_false")]
@@ -236,6 +244,7 @@ pub struct Config {
     pub total_timeout_ms: Option<u32>,
     pub shutdown_timeout_ms: u64,
     pub stats_socket_listen_address: Option<String>,
+    pub stats_socket_mode: Permissions,
     pub expect_proxy: bool,
     pub reuse_port: bool,
     pub syslog_config: Option<SyslogConfig>,
@@ -252,6 +261,7 @@ impl Config {
             total_timeout_ms: raw.total_timeout_ms,
             shutdown_timeout_ms: u64::from(raw.shutdown_timeout_ms.unwrap_or(5_000)),
             stats_socket_listen_address: raw.stats_socket_listen_address,
+            stats_socket_mode: Permissions::from_mode(raw.stats_socket_mode),
             expect_proxy: raw.expect_proxy,
             reuse_port: raw.reuse_port,
             syslog_config: raw.syslog,

@@ -109,7 +109,7 @@ dependencies = [
 
 [[package]]
 name = "ferrous-socks"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "byteorder",
  "clap",

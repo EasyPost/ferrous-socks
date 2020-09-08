@@ -1,3 +1,4 @@
+use std::fs::Permissions;
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -12,7 +13,10 @@ use crate::stats::Stats;
 
 /// Bind a listening UNIX domain socket at /foo/bar by first
 /// binding to /foo/bar.pid and atomically renaming to /foo/bar
-pub fn bind_unix_listener<P: AsRef<Path>>(path: P) -> tokio::io::Result<UnixListener> {
+pub fn bind_unix_listener<P: AsRef<Path>>(
+    path: P,
+    mode: Permissions,
+) -> tokio::io::Result<UnixListener> {
     let mut path_buf = path.as_ref().to_owned();
     let orig_path_buf = path_buf.clone();
     if let Ok(metadata) = std::fs::metadata(&path_buf) {
@@ -24,6 +28,7 @@ pub fn bind_unix_listener<P: AsRef<Path>>(path: P) -> tokio::io::Result<UnixList
     target_file_name.push(format!(".{}", std::process::id()));
     path_buf.set_file_name(target_file_name);
     let listener = UnixListener::bind(&path_buf)?;
+    std::fs::set_permissions(&path_buf, mode)?;
     std::fs::rename(path_buf, orig_path_buf)?;
     Ok(listener)
 }

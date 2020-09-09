@@ -309,6 +309,7 @@ async fn handle_one_connection(
         };
         let remote_end = conn.peer_addr()?;
         let local_end = conn.local_addr()?;
+        stats.set_connection(conn_id, local_end, remote_end).await;
         info!(
             "{}: connected to {:?} from {:?}",
             conn_id, remote_end, local_end

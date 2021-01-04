@@ -1,4 +1,4 @@
-use tokio::prelude::*;
+use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use crate::request::Version;
 

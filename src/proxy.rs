@@ -5,8 +5,8 @@ use std::net::{IpAddr, SocketAddr};
 
 use byteorder::NetworkEndian;
 use derive_more::Display;
+use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
-use tokio::prelude::*;
 
 #[derive(Debug)]
 pub(crate) enum Mode {

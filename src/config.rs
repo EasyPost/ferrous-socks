@@ -200,6 +200,7 @@ impl ListenAddress {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RawConfig {
     #[serde(alias = "listen-address")]
     #[serde(alias = "listen-addresses")]

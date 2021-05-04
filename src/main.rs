@@ -504,24 +504,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 stats_socket_listen_address,
                 conf.stats_socket_mode.clone(),
             )
-            .expect(
-                format!(
+            .unwrap_or_else(|_| {
+                panic!(
                     "failed to bind to domain socket {:?}",
                     stats_socket_listen_address
                 )
-                .as_str(),
-            );
+            });
             tokio::spawn(stats_socket::stats_main_unix(listener, Arc::clone(&stats)));
         } else {
             let listener = tokio::net::TcpListener::bind(stats_socket_listen_address)
                 .await
-                .expect(
-                    format!(
+                .unwrap_or_else(|_| {
+                    panic!(
                         "failed to bind to TCP socket {:?}",
                         stats_socket_listen_address
                     )
-                    .as_str(),
-                );
+                });
             tokio::spawn(stats_socket::stats_main_tcp(listener, Arc::clone(&stats)));
         }
     }
@@ -552,7 +550,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             let listener = listener
                 .bind(addr)
-                .expect(format!("failed to bind to {:?}", addr).as_str());
+                .unwrap_or_else(|_| panic!("failed to bind to {:?}", addr));
             info!("Listening on: {}", addr);
 
             TcpListener::from_std(

@@ -7,7 +7,6 @@ use std::path::Path;
 
 use derive_more::Display;
 use serde_derive::Deserialize;
-use syslog;
 
 use crate::acl::{Acl, AclAction, AclItem};
 
@@ -52,6 +51,7 @@ fn _default_mode() -> u32 {
 
 #[derive(Debug, Deserialize, Clone, Copy)]
 #[allow(non_camel_case_types)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum SyslogFacility {
     KERN,
     USER,
@@ -75,12 +75,12 @@ pub enum SyslogFacility {
     LOCAL7,
 }
 
-impl Into<syslog::Facility> for SyslogFacility {
-    fn into(self) -> syslog::Facility {
+impl From<SyslogFacility> for syslog::Facility {
+    fn from(f: SyslogFacility) -> syslog::Facility {
         use syslog::Facility::*;
         use SyslogFacility::*;
 
-        match self {
+        match f {
             KERN => LOG_KERN,
             USER => LOG_USER,
             MAIL => LOG_MAIL,
@@ -107,6 +107,7 @@ impl Into<syslog::Facility> for SyslogFacility {
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 #[allow(non_camel_case_types)]
+#[allow(clippy::upper_case_acronyms)]
 pub enum LogLevel {
     ERROR,
     WARN,
@@ -121,9 +122,9 @@ impl Default for LogLevel {
     }
 }
 
-impl Into<log::LevelFilter> for LogLevel {
-    fn into(self) -> log::LevelFilter {
-        match self {
+impl From<LogLevel> for log::LevelFilter {
+    fn from(ll: LogLevel) -> log::LevelFilter {
+        match ll {
             LogLevel::ERROR => log::LevelFilter::Error,
             LogLevel::WARN => log::LevelFilter::Warn,
             LogLevel::INFO => log::LevelFilter::Info,

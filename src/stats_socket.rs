@@ -21,7 +21,7 @@ pub fn bind_unix_listener<P: AsRef<Path>>(
     let orig_path_buf = path_buf.clone();
     if let Ok(metadata) = std::fs::metadata(&path_buf) {
         if !metadata.file_type().is_socket() {
-            panic!(format!("pre-existing non-socket file at {:?}", path_buf));
+            panic!("pre-existing non-socket file at {:?}", path_buf);
         }
     }
     let mut target_file_name = path_buf.file_name().unwrap().to_owned();

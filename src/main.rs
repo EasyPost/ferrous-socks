@@ -339,14 +339,8 @@ async fn handle_one_connection(
                     .await?;
             }
         }
-        let (mut conn_r, mut conn_w) = conn.split();
-        let (mut socket_r, mut socket_w) = socket.split();
-        let (first, second) = tokio::join!(
-            util::copy_then_shutdown(&mut conn_r, &mut socket_w),
-            util::copy_then_shutdown(&mut socket_r, &mut conn_w)
-        );
-        first?;
-        second?;
+        let (stoc, ctos) = tokio::io::copy_bidirectional(&mut conn, &mut socket).await?;
+        stats.record_traffic(stoc, ctos);
         Ok(true)
     } else {
         Ok(false)

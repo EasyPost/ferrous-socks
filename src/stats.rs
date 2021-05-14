@@ -29,9 +29,25 @@ impl StatIncrement for AtomicU64 {
 }
 
 #[derive(Debug, Serialize)]
+pub struct InFlightConnection {
+    local_end: SocketAddr,
+    remote_end: SocketAddr,
+}
+
+impl InFlightConnection {
+    fn new(local_end: SocketAddr, remote_end: SocketAddr) -> Self {
+        InFlightConnection {
+            local_end,
+            remote_end,
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub struct Session {
     source_address: SocketAddr,
     request: Option<Request>,
+    connection: Option<InFlightConnection>,
     #[serde(serialize_with = "serialize_system_time")]
     start_time: SystemTime,
 }
@@ -41,12 +57,17 @@ impl Session {
         Session {
             source_address,
             request: None,
+            connection: None,
             start_time: SystemTime::now(),
         }
     }
 
     fn set_request(&mut self, request: &Request) {
         self.request = Some(request.clone());
+    }
+
+    fn set_connection(&mut self, connection: InFlightConnection) {
+        self.connection = Some(connection)
     }
 }
 
@@ -165,6 +186,18 @@ impl Stats {
         let mut lock = self.sessions.write().await;
         if let Some(s) = lock.get_mut(&request_id) {
             s.set_request(request)
+        }
+    }
+
+    pub async fn set_connection(
+        &self,
+        request_id: u64,
+        local_end: SocketAddr,
+        remote_end: SocketAddr,
+    ) {
+        let mut lock = self.sessions.write().await;
+        if let Some(s) = lock.get_mut(&request_id) {
+            s.set_connection(InFlightConnection::new(local_end, remote_end))
         }
     }
 

@@ -84,7 +84,7 @@ where
 
 macro_rules! generate_stats_main {
     ($name:ident, $listener_type:ty) => {
-        pub async fn $name(mut listener: $listener_type, stats: Arc<Stats>) {
+        pub async fn $name(listener: $listener_type, stats: Arc<Stats>) {
             loop {
                 let (socket, address) = match listener.accept().await {
                     Ok(o) => o,

@@ -1,5 +1,5 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 use serde::ser::SerializeStruct;
@@ -27,6 +27,6 @@ where
     D: AsRef<TcpStream> + AsyncWrite + Unpin,
 {
     tokio::io::copy(src, dest).await?;
-    dest.as_ref().shutdown(std::net::Shutdown::Write)?;
+    dest.shutdown().await?;
     Ok(())
 }

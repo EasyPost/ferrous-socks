@@ -2,8 +2,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use log::debug;
 use serde_derive::Serialize;
-use socket2::{Domain, Socket, Type};
-use tokio::net::TcpStream;
+use tokio::net::{TcpSocket, TcpStream};
 
 use crate::config::Config;
 
@@ -63,15 +62,12 @@ async fn connect_bind(
     let connect = SocketAddr::new(connect_addr, connect_port);
     let bind = SocketAddr::new(bind_addr, 0).into();
     let socket = if bind_addr.is_ipv4() {
-        Socket::new(Domain::ipv4(), Type::stream(), None)?
+        TcpSocket::new_v4()
     } else {
-        Socket::new(Domain::ipv6(), Type::stream(), None)?
-    };
-    socket.bind(&bind)?;
-    // This method is undocumented but works
-    // see https://github.com/tokio-rs/mio/issues/1257 for details
-    let stream = TcpStream::connect_std(socket.into_tcp_stream(), &connect).await?;
-    Ok(stream)
+        TcpSocket::new_v6()
+    }?;
+    socket.bind(bind)?;
+    socket.connect(connect).await
 }
 
 async fn connect_one(

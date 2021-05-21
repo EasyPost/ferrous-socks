@@ -1,3 +1,10 @@
+1.0.4
+-----
+- Include local and peer address in in-flight connections on the control socket
+- Bump to Tokio 1.x
+- Add some more metrics
+- Fatal if config includes invalid fields
+
 1.0.3
 ----
 - You can now pass a list of addresses to listen on

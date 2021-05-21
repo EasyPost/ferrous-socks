@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
+use log::debug;
 use serde_derive::Serialize;
 use tokio::sync::RwLock;
 
@@ -71,7 +72,7 @@ impl Session {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct Stats {
     handshake_failed: AtomicU64,
     handshake_success: AtomicU64,
@@ -87,6 +88,8 @@ pub struct Stats {
     connection_network_unreachable: AtomicU64,
     in_flight: AtomicU64,
     next_request_id: AtomicU64,
+    bytes_client_to_server: AtomicU64,
+    bytes_server_to_client: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
 }
 
@@ -103,6 +106,8 @@ pub struct DumpableStats<'a> {
     connection_address_not_supported: u64,
     connection_socks_failure: u64,
     connection_network_unreachable: u64,
+    bytes_client_to_server: u64,
+    bytes_server_to_client: u64,
     in_flight: u64,
     sessions: &'a HashMap<u64, Session>,
 }
@@ -110,21 +115,9 @@ pub struct DumpableStats<'a> {
 impl Stats {
     pub fn new() -> Self {
         Stats {
-            handshake_failed: AtomicU64::default(),
-            handshake_success: AtomicU64::default(),
-            handshake_authenticated: AtomicU64::default(),
-            handshake_timeout: AtomicU64::default(),
-            session_success: AtomicU64::default(),
-            session_timeout: AtomicU64::default(),
-            session_error: AtomicU64::default(),
-            connection_connected: AtomicU64::default(),
-            connection_not_allowed: AtomicU64::default(),
-            connection_address_not_supported: AtomicU64::default(),
-            connection_socks_failure: AtomicU64::default(),
-            connection_network_unreachable: AtomicU64::default(),
-            in_flight: AtomicU64::default(),
             next_request_id: AtomicU64::new(1),
             sessions: RwLock::new(HashMap::new()),
+            ..Default::default()
         }
     }
 
@@ -182,6 +175,14 @@ impl Stats {
         lock.remove(&request_id);
     }
 
+    pub fn record_traffic(&self, stoc: u64, ctos: u64) {
+        debug!("copied {} bytes from c->s and {} bytes s->c", ctos, stoc);
+        self.bytes_server_to_client
+            .fetch_add(stoc, Ordering::Relaxed);
+        self.bytes_client_to_server
+            .fetch_add(ctos, Ordering::Relaxed);
+    }
+
     pub async fn set_request(&self, request_id: u64, request: &Request) {
         let mut lock = self.sessions.write().await;
         if let Some(s) = lock.get_mut(&request_id) {
@@ -216,6 +217,8 @@ impl Stats {
             connection_not_allowed: self.connection_not_allowed.load_stat(),
             connection_socks_failure: self.connection_socks_failure.load_stat(),
             connection_network_unreachable: self.connection_network_unreachable.load_stat(),
+            bytes_server_to_client: self.bytes_server_to_client.load_stat(),
+            bytes_client_to_server: self.bytes_client_to_server.load_stat(),
             sessions: &*lock,
         };
         serde_json::to_vec(&buf)

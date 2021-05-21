@@ -5,6 +5,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use byteorder::{ByteOrder, NetworkEndian};
 use clap::{self, Arg};
 use derive_more::Display;
@@ -339,14 +340,8 @@ async fn handle_one_connection(
                     .await?;
             }
         }
-        let (mut conn_r, mut conn_w) = conn.split();
-        let (mut socket_r, mut socket_w) = socket.split();
-        let (first, second) = tokio::join!(
-            util::copy_then_shutdown(&mut conn_r, &mut socket_w),
-            util::copy_then_shutdown(&mut socket_r, &mut conn_w)
-        );
-        first?;
-        second?;
+        let (stoc, ctos) = tokio::io::copy_bidirectional(&mut conn, &mut socket).await?;
+        stats.record_traffic(stoc, ctos);
         Ok(true)
     } else {
         Ok(false)
@@ -458,7 +453,7 @@ async fn handle_connections(
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
+async fn main() -> anyhow::Result<()> {
     let matches = clap::App::new(env!("CARGO_PKG_NAME"))
         .version(env!("CARGO_PKG_VERSION"))
         .author("EasyPost <oss@easypost.com>")
@@ -499,24 +494,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 stats_socket_listen_address,
                 conf.stats_socket_mode.clone(),
             )
-            .expect(
+            .with_context(|| {
                 format!(
                     "failed to bind to domain socket {:?}",
-                    stats_socket_listen_address
+                    stats_socket_listen_address,
                 )
-                .as_str(),
-            );
+            })?;
             tokio::spawn(stats_socket::stats_main_unix(listener, Arc::clone(&stats)));
         } else {
             let listener = tokio::net::TcpListener::bind(stats_socket_listen_address)
                 .await
-                .expect(
+                .with_context(|| {
                     format!(
                         "failed to bind to TCP socket {:?}",
                         stats_socket_listen_address
                     )
-                    .as_str(),
-                );
+                })?;
             tokio::spawn(stats_socket::stats_main_tcp(listener, Arc::clone(&stats)));
         }
     }
@@ -533,22 +526,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             listener
                 .set_reuseaddr(true)
-                .expect("failed to set SO_REUSEADDR");
+                .context("failed to set SO_REUSEADDR")?;
 
             #[cfg(all(unix, not(any(target_os = "solaris"))))]
             listener
                 .set_reuseport(conf.reuse_port)
-                .expect("failed to set SO_REUSEPORT");
+                .context("failed to set SO_REUSEPORT")?;
 
             listener
                 .bind(*addr)
-                .expect(format!("failed to bind to {:?}", addr).as_str());
+                .with_context(|| format!("failed to bind to {:?}", addr))?;
             info!("Listening on: {}", addr);
 
             listener
                 .listen(LISTEN_BACKLOG)
-                .expect("Failed to listen on socket")
+                .context("failed to listen on socket")
         })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
         .map(|listener| {
             tokio::spawn(handle_connections(
                 listener,

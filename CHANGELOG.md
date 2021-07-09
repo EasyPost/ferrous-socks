@@ -1,3 +1,7 @@
+1.0.5
+-----
+- Minor dependency bumps
+
 1.0.4
 -----
 - Include local and peer address in in-flight connections on the control socket

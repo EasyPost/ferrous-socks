@@ -1,8 +1,8 @@
 use ip_network::IpNetwork;
-use serde_derive::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 pub enum AclAction {
     Allow,
     Reject,
@@ -23,7 +23,7 @@ impl Default for AclAction {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct AclItem {
     pub action: AclAction,
     pub destination_network: Option<IpNetwork>,
@@ -43,6 +43,10 @@ impl Acl {
             items,
             default_action,
         }
+    }
+
+    pub fn into_parts(self) -> (Vec<AclItem>, AclAction) {
+        (self.items, self.default_action)
     }
 
     pub fn is_permitted(&self, username: Option<&str>, ip: IpAddr, dport: u16) -> bool {

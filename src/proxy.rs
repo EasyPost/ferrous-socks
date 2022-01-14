@@ -8,13 +8,13 @@ use derive_more::Display;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Mode {
     Local,
     Proxy,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Family {
     Unspec,
     Inet,
@@ -22,14 +22,14 @@ pub(crate) enum Family {
     Unix,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) enum Transport {
     Empty,
     Stream,
     Dgram,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct ProxyHeader {
     pub mode: Mode,
     pub family: Family,

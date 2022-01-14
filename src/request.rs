@@ -1,7 +1,7 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 use log::debug;
-use serde_derive::Serialize;
+use serde::Serialize;
 use tokio::net::{TcpSocket, TcpStream};
 
 use crate::config::Config;
@@ -48,7 +48,7 @@ impl Request {
 
 pub enum Connection {
     Connected(TcpStream),
-    ConnectionNotAllowed,
+    NotAllowed,
     AddressNotSupported,
     SocksFailure,
 }
@@ -110,7 +110,7 @@ async fn connect_one(
             Connection::AddressNotSupported
         }
     } else {
-        Connection::ConnectionNotAllowed
+        Connection::NotAllowed
     };
     Ok(conn)
 }
@@ -133,14 +133,14 @@ impl Request {
                         Connection::AddressNotSupported => {
                             saw_not_supported = true;
                         }
-                        Connection::ConnectionNotAllowed => {
+                        Connection::NotAllowed => {
                             saw_not_allowed = true;
                         }
                         _ => {}
                     }
                 }
                 if saw_not_allowed {
-                    Connection::ConnectionNotAllowed
+                    Connection::NotAllowed
                 } else if saw_not_supported {
                     Connection::AddressNotSupported
                 } else {

@@ -6,14 +6,14 @@ use tokio::net::{TcpSocket, TcpStream};
 
 use crate::config::Config;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Address {
     IpAddr(IpAddr),
     DomainName(String),
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub enum Version {
     #[serde(rename = "4")]
     Four,
@@ -21,7 +21,7 @@ pub enum Version {
     Five,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct Request {
     pub address: Address,
     pub dport: u16,
@@ -36,12 +36,6 @@ impl Request {
             dport,
             ver,
             username,
-        }
-    }
-
-    pub fn set_username(&mut self, username: Option<String>) {
-        if username.is_some() {
-            self.username = username
         }
     }
 }

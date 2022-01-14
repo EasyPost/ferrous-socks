@@ -9,7 +9,7 @@ use futures::stream::StreamExt;
 use log::{debug, error, info, warn};
 use permit::Permit;
 use thiserror::Error;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::config::Config;
@@ -19,6 +19,7 @@ use crate::stats::Stats;
 
 const LISTEN_BACKLOG: u32 = 128;
 
+#[derive(Debug, PartialEq, Eq)]
 enum HandshakeResult {
     Okay,
     AuthenticatedAs(String),
@@ -26,7 +27,10 @@ enum HandshakeResult {
     Version4([u8; 2]),
 }
 
-async fn authenticate_rfc1929(socket: &mut TcpStream) -> Result<Option<String>, tokio::io::Error> {
+async fn authenticate_rfc1929<S>(socket: &mut S) -> Result<Option<String>, tokio::io::Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
+{
     let mut buf = [0u8; 2];
     socket.read_exact(&mut buf).await?;
     // VER = 0x01
@@ -49,7 +53,10 @@ async fn authenticate_rfc1929(socket: &mut TcpStream) -> Result<Option<String>, 
 ///
 /// If returns HandshakeResult::Failed, the stream should be closed. Otherwise,
 /// we are (to some degree) authenticated.
-async fn handshake_auth(socket: &mut TcpStream) -> Result<HandshakeResult, tokio::io::Error> {
+async fn handshake_auth<S>(socket: &mut S) -> Result<HandshakeResult, tokio::io::Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
+{
     // If this is SOCKS4, the first byte is 0x04 and the second byte is actually not part of the
     // handshake. Oops!
     let mut init_buf = [0u8; 2];
@@ -103,10 +110,14 @@ enum RequestError {
 }
 
 /// Read a SOCKSv4 or SOCKSv5 request from the stream
-async fn read_request(
-    socket: &mut TcpStream,
+async fn read_request<S>(
+    socket: &mut S,
     already_read: Option<[u8; 2]>,
-) -> Result<Option<Request>, RequestError> {
+    username: Option<String>,
+) -> Result<Option<Request>, RequestError>
+where
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
+{
     let (ver, cmd, addr_type) = if let Some(already_read) = already_read {
         (already_read[0], already_read[1], 0x01u8)
     } else {
@@ -188,7 +199,7 @@ async fn read_request(
             let mut port_buf = [0u8; 2];
             socket.read_exact(&mut port_buf).await?;
             let dport = NetworkEndian::read_u16(&port_buf);
-            Request::new(address, dport, version, None)
+            Request::new(address, dport, version, username)
         }
     };
     if cmd != 0x01 {
@@ -200,13 +211,16 @@ async fn read_request(
     Ok(Some(request))
 }
 
-async fn handle_one_connection(
-    mut socket: TcpStream,
+async fn handle_one_connection<S>(
+    mut socket: S,
     address: SocketAddr,
     config: Arc<Config>,
     stats: &Stats,
     conn_id: u64,
-) -> Result<bool, anyhow::Error> {
+) -> Result<bool, anyhow::Error>
+where
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
+{
     let address = if config.expect_proxy {
         let header = match tokio::time::timeout(
             config.proxy_protocol_timeout,
@@ -250,11 +264,10 @@ async fn handle_one_connection(
     };
     stats.handshake_success();
     debug!("{}: handshake succeeded", conn_id);
-    let request = read_request(&mut socket, already_read)
+    let request = read_request(&mut socket, already_read, username)
         .await
         .context("error reading request")?;
-    if let Some(mut request) = request {
-        request.set_username(username);
+    if let Some(request) = request {
         if let Some(ref u) = request.username {
             debug!("{}: authenticated as {:?}", conn_id, u);
         } else {
@@ -478,4 +491,158 @@ pub async fn run(
         })
         .collect::<Vec<tokio::task::JoinHandle<_>>>();
     Ok((handles, permit))
+}
+
+#[cfg(test)]
+mod tests {
+    use hex_literal::hex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    use super::{authenticate_rfc1929, handshake_auth, read_request, HandshakeResult};
+    use crate::request::{Address, Request, Version};
+
+    #[tokio::test]
+    async fn test_authenticate_rfc1929() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            lhs.write_all(&hex!("01 04 75736572 07 68756e74657232"))
+                .await?;
+            let mut buf = [0xffu8; 2];
+            lhs.read_exact(&mut buf).await?;
+            Ok::<_, tokio::io::Error>(buf)
+        });
+        assert_eq!(
+            authenticate_rfc1929(&mut rhs).await.unwrap(),
+            Some("user".to_string())
+        );
+        let buf = h.await.unwrap().unwrap();
+        assert_eq!(buf, hex!("0100"));
+    }
+
+    #[tokio::test]
+    async fn test_handshake_auth_no_methods() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            lhs.write_all(&hex!("05 00")).await?;
+            let mut buf = [0xffu8; 2];
+            lhs.read_exact(&mut buf).await?;
+            Ok::<_, tokio::io::Error>(buf)
+        });
+        let result = handshake_auth(&mut rhs).await.unwrap();
+        assert_eq!(result, HandshakeResult::Failed);
+        let buf = h.await.unwrap().unwrap();
+        assert_eq!(buf, hex!("05ff"));
+    }
+
+    #[tokio::test]
+    async fn test_handshake_auth_prefers_auth() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            lhs.write_all(&hex!("05 02 00 02")).await?;
+            let mut buf = [0xffu8; 2];
+            lhs.read_exact(&mut buf).await?;
+            assert!(&buf == &[0x05u8, 0x02u8]);
+            lhs.write_all(&hex!("01 04 75736572 07 68756e74657232"))
+                .await?;
+            lhs.read_exact(&mut buf).await?;
+            Ok::<_, tokio::io::Error>(buf)
+        });
+        let result = handshake_auth(&mut rhs).await.unwrap();
+        assert_eq!(result, HandshakeResult::AuthenticatedAs("user".to_string()));
+        let buf = h.await.unwrap().unwrap();
+        assert_eq!(buf, hex!("0100"));
+    }
+
+    #[tokio::test]
+    async fn test_handshake_auth_accepts_no_auth() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            lhs.write_all(&hex!("05 02 00 7f")).await?;
+            let mut buf = [0xffu8; 2];
+            lhs.read_exact(&mut buf).await?;
+            assert!(&buf == &[0x05u8, 0x00u8]);
+            Ok::<_, tokio::io::Error>(buf)
+        });
+        let result = handshake_auth(&mut rhs).await.unwrap();
+        assert_eq!(result, HandshakeResult::Okay);
+        let buf = h.await.unwrap().unwrap();
+        assert_eq!(buf, hex!("0500"));
+    }
+
+    #[tokio::test]
+    async fn test_read_request_v4() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            let req = hex!("0050 08080404 62617a00");
+            lhs.write_all(&req).await?;
+            Ok::<_, tokio::io::Error>(())
+        });
+
+        let req = read_request(&mut rhs, Some(hex!("0401")), None)
+            .await
+            .unwrap();
+        assert_eq!(
+            req,
+            Some(Request {
+                address: Address::IpAddr("8.8.4.4".parse().unwrap()),
+                dport: 80,
+                ver: Version::Four,
+                username: Some("baz".to_owned()),
+            })
+        );
+        h.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_request_v5_ipv4() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            let req = hex!("05 01 00 01 08080404 0050");
+            lhs.write_all(&req).await?;
+            Ok::<_, tokio::io::Error>(())
+        });
+
+        let req = read_request(&mut rhs, None, Some("foo".to_owned()))
+            .await
+            .unwrap();
+        assert_eq!(
+            req,
+            Some(Request {
+                address: Address::IpAddr("8.8.4.4".parse().unwrap()),
+                dport: 80,
+                ver: Version::Five,
+                username: Some("foo".to_owned()),
+            })
+        );
+        h.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_request_v5_address() {
+        let (mut lhs, mut rhs) = tokio::net::UnixStream::pair().unwrap();
+
+        let h = tokio::spawn(async move {
+            let req = hex!("05 01 00 03 0f 7777772e6578616d706c652e636f6d 0050");
+            lhs.write_all(&req).await?;
+            Ok::<_, tokio::io::Error>(())
+        });
+
+        let req = read_request(&mut rhs, None, None).await.unwrap();
+        assert_eq!(
+            req,
+            Some(Request {
+                address: Address::DomainName("www.example.com".to_owned()),
+                dport: 80,
+                ver: Version::Five,
+                username: None,
+            })
+        );
+        h.await.unwrap().unwrap();
+    }
 }

@@ -18,3 +18,25 @@ where
         ser.serialize_str("unknown")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::serialize_system_time;
+    use serde::Serialize;
+    use std::time::{Duration, SystemTime};
+
+    #[derive(Serialize)]
+    struct Uut {
+        #[serde(serialize_with = "serialize_system_time")]
+        uut: SystemTime,
+    }
+
+    #[test]
+    fn test_serialize_system_time() {
+        let uut = Uut {
+            uut: std::time::UNIX_EPOCH + Duration::from_secs(1642138333),
+        };
+        let found = serde_json::to_string(&uut).unwrap();
+        assert!(found.contains(r#"{"uut":{"ts":1642138333.0,"ago":"#));
+    }
+}

@@ -26,3 +26,6 @@ ip_network = { version = "0.3", features = ["serde"] }
 serde_json = "1"
 syslog = "5"
 thiserror = "1"
+
+[dev-dependencies]
+hex-literal = "0.3"

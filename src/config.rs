@@ -7,29 +7,17 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 
-use derive_more::Display;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::acl::{Acl, AclAction, AclItem};
 
-#[derive(Debug, Display)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
-    IoError(std::io::Error),
-    DeserializationError(toml::de::Error),
-}
-
-impl std::error::Error for ConfigError {}
-
-impl From<std::io::Error> for ConfigError {
-    fn from(e: std::io::Error) -> Self {
-        ConfigError::IoError(e)
-    }
-}
-
-impl From<toml::de::Error> for ConfigError {
-    fn from(e: toml::de::Error) -> Self {
-        ConfigError::DeserializationError(e)
-    }
+    #[error("I/O error reading configuration: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Deserialization error reading configuration: {0}")]
+    Deserialization(#[from] toml::de::Error),
 }
 
 fn _true() -> bool {

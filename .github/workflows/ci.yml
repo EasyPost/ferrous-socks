@@ -10,7 +10,6 @@ env:
 
 jobs:
   style:
-    name: Check Style
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
@@ -50,7 +49,14 @@ jobs:
         toolchain: stable
         components: rustfmt
         default: true
-    - name: cargo audit
-      uses: actions-rs/audit-check@v1.2.0
+    - name: Install cargo-audit binary crate
+      uses: actions-rs/install@v0.1
       with:
-        token: ${{ secrets.GITHUB_TOKEN }}
+        crate: cargo-audit
+        version: latest
+        use-tool-cache: true
+    - name: cargo audit
+      uses: actions-rs/cargo@v1
+      with:
+        command: audit
+        args: --ignore RUSTSEC-2020-0071

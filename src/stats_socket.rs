@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures::stream::{Stream, StreamExt};
 use log::{debug, warn};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -38,7 +39,7 @@ async fn handle_stats_connection<S>(
     stats: Arc<Stats>,
 ) -> Result<(), tokio::io::Error>
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
 {
     let dumped = stats.serialize_to_vec().await;
     match dumped {
@@ -54,9 +55,9 @@ where
 
 async fn handle_stats_connection_wrapper<S>(socket: S, stats: Arc<Stats>)
 where
-    S: AsyncRead + AsyncWrite + Unpin,
+    S: AsyncRead + AsyncWrite + Unpin + 'static,
 {
-    let timeout = Duration::from_secs(10);
+    let timeout = Duration::from_secs(3);
     match tokio::time::timeout(timeout, handle_stats_connection(socket, stats)).await {
         Ok(Ok(_)) => (),
         Ok(Err(e)) => {
@@ -66,40 +67,47 @@ where
     }
 }
 
-/* This is gross.
- *
- * async functions in traits isn't stable, so there's no trait that both
- * TcpListener and UnixListener implement. Therefore, if we want to be able
- * to do both, we have to copy-pasta the code. At least do it with a macro!
- *
- * In some better universe there'd be something like
- *
- * trait StreamListener {
- *   type StreamType: AsyncRead + AsyncWrite + Unpin;
- *   type AddressType;
- *
- *   async fn accept() -> (Self::StreamType, Self::AddressType);
- * }
- */
-
-macro_rules! generate_stats_main {
-    ($name:ident, $listener_type:ty) => {
-        pub async fn $name(listener: $listener_type, stats: Arc<Stats>) {
-            loop {
-                let (socket, address) = match listener.accept().await {
-                    Ok(o) => o,
-                    Err(e) => {
-                        warn!("error accepting on stats socket: {:?}", e);
-                        return;
-                    }
-                };
-                debug!("stats conn from {:?}", address);
-                let my_stats = Arc::clone(&stats);
-                tokio::spawn(handle_stats_connection_wrapper(socket, my_stats));
-            }
-        }
-    };
+pub struct StatsServer {
+    stats: Arc<Stats>,
+    permit: permit::Permit,
 }
 
-generate_stats_main!(stats_main_tcp, TcpListener);
-generate_stats_main!(stats_main_unix, UnixListener);
+impl StatsServer {
+    pub fn new(stats: Arc<Stats>, permit: permit::Permit) -> Self {
+        Self { stats, permit }
+    }
+
+    pub async fn run<S, ST>(self, stream: S)
+    where
+        S: Stream<Item = std::io::Result<ST>> + Unpin,
+        ST: Send + AsyncRead + AsyncWrite + Unpin + 'static,
+    {
+        let stats = self.stats;
+        let permit_listen = self.permit.new_sub();
+        futures::future::select(
+            self.permit,
+            stream
+                .take_until(permit_listen)
+                .for_each_concurrent(5, move |conn| {
+                    let my_stats = Arc::clone(&stats);
+                    async {
+                        if let Ok(conn) = conn {
+                            handle_stats_connection_wrapper(conn, my_stats).await;
+                        }
+                    }
+                }),
+        )
+        .await;
+        debug!("stats server shut down");
+    }
+
+    pub async fn run_tcp(self, listener: TcpListener) {
+        self.run(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await;
+    }
+
+    pub async fn run_unix(self, listener: UnixListener) {
+        self.run(tokio_stream::wrappers::UnixListenerStream::new(listener))
+            .await;
+    }
+}

@@ -29,11 +29,14 @@ impl Reply {
         }
     }
 
-    pub async fn write_error<A: AsyncWrite + Unpin>(
+    pub async fn write_error<A>(
         &self,
         into: &mut A,
         version: Version,
-    ) -> Result<(), tokio::io::Error> {
+    ) -> Result<(), tokio::io::Error>
+    where
+        A: AsyncWrite + Unpin + 'static,
+    {
         match version {
             Version::Four => {
                 into.write_all(&[0x00, 0x5b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])

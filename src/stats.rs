@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 
 use log::debug;
-use serde_derive::Serialize;
+use serde::Serialize;
 use tokio::sync::RwLock;
 
 use crate::request::{Connection, Request};
@@ -91,6 +91,7 @@ pub struct Stats {
     bytes_client_to_server: AtomicU64,
     bytes_server_to_client: AtomicU64,
     sessions: RwLock<HashMap<u64, Session>>,
+    proxy_protocol_timeout: AtomicU64,
 }
 
 #[derive(Debug, Serialize)]
@@ -110,6 +111,7 @@ pub struct DumpableStats<'a> {
     bytes_server_to_client: u64,
     in_flight: u64,
     sessions: &'a HashMap<u64, Session>,
+    proxy_protocol_timeout: u64,
 }
 
 impl Stats {
@@ -149,13 +151,17 @@ impl Stats {
         self.session_timeout.stat_increment();
     }
 
+    pub fn proxy_protocol_timeout(&self) {
+        self.proxy_protocol_timeout.stat_increment();
+    }
+
     pub fn record_connection(&self, c: &Result<Connection, ::std::io::Error>) {
         match c {
             Ok(Connection::Connected(_)) => self.connection_connected.stat_increment(),
             Ok(Connection::AddressNotSupported) => {
                 self.connection_address_not_supported.stat_increment()
             }
-            Ok(Connection::ConnectionNotAllowed) => self.connection_not_allowed.stat_increment(),
+            Ok(Connection::NotAllowed) => self.connection_not_allowed.stat_increment(),
             Ok(Connection::SocksFailure) => self.connection_socks_failure.stat_increment(),
             Err(_) => self.connection_network_unreachable.stat_increment(),
         }
@@ -220,6 +226,7 @@ impl Stats {
             bytes_server_to_client: self.bytes_server_to_client.load_stat(),
             bytes_client_to_server: self.bytes_client_to_server.load_stat(),
             sessions: &*lock,
+            proxy_protocol_timeout: self.proxy_protocol_timeout.load_stat(),
         };
         serde_json::to_vec(&buf)
     }

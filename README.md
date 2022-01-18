@@ -13,4 +13,4 @@ Features:
  - basic SOCKS4 and SOCKS4a support (username parameter is ignored)
  - will accept any username+password authentication (and log the username)
 
-Check out [example.toml](example.toml) for an example of what the config file looks like.
+Check out [example.toml](example.toml) for an example of what the config file looks like. You can generate the default config by running `ferrous-socks --dump-config default.toml`

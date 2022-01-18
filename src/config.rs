@@ -1,33 +1,22 @@
 use std::fs::File;
 use std::fs::Permissions;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::time::Duration;
 
-use derive_more::Display;
-use serde_derive::Deserialize;
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
 use crate::acl::{Acl, AclAction, AclItem};
 
-#[derive(Debug, Display)]
+#[derive(Debug, Error)]
 pub enum ConfigError {
-    IoError(std::io::Error),
-    DeserializationError(toml::de::Error),
-}
-
-impl std::error::Error for ConfigError {}
-
-impl From<std::io::Error> for ConfigError {
-    fn from(e: std::io::Error) -> Self {
-        ConfigError::IoError(e)
-    }
-}
-
-impl From<toml::de::Error> for ConfigError {
-    fn from(e: toml::de::Error) -> Self {
-        ConfigError::DeserializationError(e)
-    }
+    #[error("I/O error reading configuration: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Deserialization error reading configuration: {0}")]
+    Deserialization(#[from] toml::de::Error),
 }
 
 fn _true() -> bool {
@@ -49,7 +38,7 @@ fn _default_mode() -> u32 {
     0o600
 }
 
-#[derive(Debug, Deserialize, Clone, Copy)]
+#[derive(Debug, Deserialize, Serialize, Clone, Copy)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum SyslogFacility {
@@ -105,7 +94,7 @@ impl From<SyslogFacility> for syslog::Facility {
     }
 }
 
-#[derive(Debug, Deserialize, Copy, Clone)]
+#[derive(Debug, Deserialize, Serialize, Copy, Clone)]
 #[allow(non_camel_case_types)]
 #[allow(clippy::upper_case_acronyms)]
 pub enum LogLevel {
@@ -114,12 +103,6 @@ pub enum LogLevel {
     INFO,
     DEBUG,
     TRACE,
-}
-
-impl Default for LogLevel {
-    fn default() -> Self {
-        LogLevel::INFO
-    }
 }
 
 impl From<LogLevel> for log::LevelFilter {
@@ -134,25 +117,21 @@ impl From<LogLevel> for log::LevelFilter {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SyslogConfig {
     pub facility: SyslogFacility,
-    #[serde(default)]
-    pub level: LogLevel,
+    pub level: Option<LogLevel>,
 }
 
 impl SyslogConfig {
-    pub fn initialize_logging(&self) {
-        syslog::init(
-            self.facility.into(),
-            self.level.into(),
-            Some(env!("CARGO_PKG_NAME")),
-        )
-        .expect("failed to initialize syslog");
+    pub fn initialize_logging(&self, level: log::LevelFilter) {
+        let level = self.level.map(|l| l.into()).unwrap_or(level);
+        syslog::init(self.facility.into(), level, Some(env!("CARGO_PKG_NAME")))
+            .expect("failed to initialize syslog");
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum ListenAddress {
     One(SocketAddr),
@@ -200,7 +179,7 @@ impl ListenAddress {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct RawConfig {
     #[serde(alias = "listen-address")]
@@ -217,6 +196,8 @@ pub struct RawConfig {
     pub total_timeout_ms: Option<u32>,
     #[serde(alias = "shutdown-timeout-ms")]
     pub shutdown_timeout_ms: Option<u32>,
+    #[serde(alias = "proxy-protocol-timeout-ms")]
+    pub proxy_protocol_timeout_ms: Option<u32>,
     #[serde(alias = "stats-socket-listen-address")]
     pub stats_socket_listen_address: Option<String>,
     #[serde(alias = "stats-socket-mode", default = "_default_mode")]
@@ -228,6 +209,29 @@ pub struct RawConfig {
     pub syslog: Option<SyslogConfig>,
 }
 
+impl Default for RawConfig {
+    fn default() -> Self {
+        RawConfig {
+            listen_address: ListenAddress::One(SocketAddr::new(
+                IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)),
+                1080,
+            )),
+            bind_addresses: _default_bind(),
+            acl: vec![],
+            acl_default_action: AclAction::Allow,
+            connect_timeout_ms: None,
+            total_timeout_ms: None,
+            shutdown_timeout_ms: None,
+            proxy_protocol_timeout_ms: None,
+            stats_socket_listen_address: None,
+            stats_socket_mode: _default_mode(),
+            expect_proxy: false,
+            reuse_port: false,
+            syslog: None,
+        }
+    }
+}
+
 impl RawConfig {
     fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
         let mut f = File::open(path)?;
@@ -236,15 +240,35 @@ impl RawConfig {
         let config = toml::from_str(contents.as_str())?;
         Ok(config)
     }
+
+    fn dump_to<W: std::io::Write>(&self, f: W) -> anyhow::Result<()> {
+        let v = toml::ser::to_vec(self)?;
+        let mut b = std::io::BufWriter::new(f);
+        b.write_all(&v)?;
+        Ok(())
+    }
+
+    /// Dump the given config to the path. If the path is None, will dump to stdout.
+    pub fn dump<P: AsRef<Path>>(&self, path: Option<P>) -> anyhow::Result<()> {
+        if let Some(path) = path {
+            let f = File::create(path.as_ref())?;
+            self.dump_to(f)
+        } else {
+            let stdout = std::io::stdout();
+            let f = stdout.lock();
+            self.dump_to(f)
+        }
+    }
 }
 
 pub struct Config {
     pub listen_address: ListenAddress,
     pub bind_addresses: Vec<IpAddr>,
     pub acl: Acl,
-    pub connect_timeout_ms: u32,
-    pub total_timeout_ms: Option<u32>,
-    pub shutdown_timeout_ms: u64,
+    pub connect_timeout: Duration,
+    pub total_timeout: Option<Duration>,
+    pub shutdown_timeout: Duration,
+    pub proxy_protocol_timeout: Duration,
     pub stats_socket_listen_address: Option<String>,
     pub stats_socket_mode: Permissions,
     pub expect_proxy: bool,
@@ -252,29 +276,84 @@ pub struct Config {
     pub syslog_config: Option<SyslogConfig>,
 }
 
+fn ms_with_default(val: Option<u32>, default: u32) -> Duration {
+    Duration::from_millis(u64::from(val.unwrap_or(default)))
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self::from_raw(RawConfig::default())
+    }
+}
+
 impl Config {
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
-        let raw = RawConfig::from_path(path)?;
-        Ok(Config {
+    pub fn from_raw(raw: RawConfig) -> Self {
+        Config {
             listen_address: raw.listen_address,
             bind_addresses: raw.bind_addresses,
             acl: Acl::from_parts(raw.acl, raw.acl_default_action),
-            connect_timeout_ms: raw.connect_timeout_ms.unwrap_or(10_000),
-            total_timeout_ms: raw.total_timeout_ms,
-            shutdown_timeout_ms: u64::from(raw.shutdown_timeout_ms.unwrap_or(5_000)),
+            connect_timeout: ms_with_default(raw.connect_timeout_ms, 10_000),
+            total_timeout: raw
+                .total_timeout_ms
+                .map(|d| Duration::from_millis(u64::from(d))),
+            shutdown_timeout: ms_with_default(raw.shutdown_timeout_ms, 5_000),
+            proxy_protocol_timeout: ms_with_default(raw.proxy_protocol_timeout_ms, 1_000),
             stats_socket_listen_address: raw.stats_socket_listen_address,
             stats_socket_mode: Permissions::from_mode(raw.stats_socket_mode),
             expect_proxy: raw.expect_proxy,
             reuse_port: raw.reuse_port,
             syslog_config: raw.syslog,
-        })
+        }
     }
 
-    pub fn initialize_logging(&self) {
-        if let Some(ref c) = self.syslog_config {
-            c.initialize_logging()
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, ConfigError> {
+        let raw = RawConfig::from_path(path)?;
+        Ok(Self::from_raw(raw))
+    }
+
+    fn into_raw(self) -> RawConfig {
+        let (acl, acl_default_action) = self.acl.into_parts();
+        RawConfig {
+            listen_address: self.listen_address,
+            bind_addresses: self.bind_addresses,
+            acl,
+            acl_default_action,
+            connect_timeout_ms: Some(self.connect_timeout.as_millis().try_into().unwrap()),
+            total_timeout_ms: self
+                .total_timeout
+                .map(|d| d.as_millis().try_into().unwrap()),
+            shutdown_timeout_ms: Some(self.shutdown_timeout.as_millis().try_into().unwrap()),
+            proxy_protocol_timeout_ms: Some(
+                self.proxy_protocol_timeout.as_millis().try_into().unwrap(),
+            ),
+            stats_socket_listen_address: self.stats_socket_listen_address,
+            stats_socket_mode: self.stats_socket_mode.mode(),
+            expect_proxy: self.expect_proxy,
+            reuse_port: self.reuse_port,
+            syslog: self.syslog_config,
+        }
+    }
+
+    pub fn dump<P: AsRef<Path>>(self, path: Option<P>) -> anyhow::Result<()> {
+        self.into_raw().dump(path)
+    }
+
+    pub fn initialize_logging(&self, matches: &clap::ArgMatches) {
+        let level: log::LevelFilter = matches
+            .value_of_t_or_exit::<String>("log_level")
+            .parse()
+            .expect("Invalid --log-level");
+        // this is gross but semantically equivalnet to the illegal `if let Some(ref c) = self.syslog_config && !matches.is_present("stderr")`
+        if let Some(c) = (!matches.is_present("stderr"))
+            .then(|| self.syslog_config.as_ref())
+            .flatten()
+        {
+            c.initialize_logging(level)
         } else {
-            env_logger::init()
+            env_logger::Builder::new()
+                .filter_level(level)
+                .format_timestamp_secs()
+                .init();
         }
     }
 }

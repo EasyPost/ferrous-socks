@@ -1,3 +1,12 @@
+1.0.6
+-----
+- Bump dependencies
+- Improve graceful shutdowns
+- Add `--dump-config` to generate a config
+- Clean up stats server
+- fix PROXY protocol implementation
+- Bump edition to 2021 (MRSV is therefore 1.56.0)
+
 1.0.5
 -----
 - Minor dependency bumps

@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use byteorder::{ByteOrder, NetworkEndian};
-use futures::future::FutureExt;
-use futures::stream::StreamExt;
+use futures_util::future::FutureExt;
+use futures_util::stream::StreamExt;
 use log::{debug, error, info, warn};
 use permit::Permit;
 use thiserror::Error;

@@ -1,3 +1,7 @@
+1.0.7
+-----
+- Switch to `syslog` 6 and `env_logger` 0.9 to fix RUSTSEC advisories
+
 1.0.6
 -----
 - Bump dependencies

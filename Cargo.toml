@@ -1,6 +1,6 @@
 [package]
 name = "ferrous-socks"
-version = "1.0.6"
+version = "1.0.7"
 authors = ["James Brown <jbrown@easypost.com>"]
 edition = "2021"
 license = "ISC"
@@ -11,20 +11,21 @@ repository = "https://github.com/EasyPost/ferrous-socks"
 
 [dependencies]
 anyhow = "1.0"
-tokio = { version = "^1.5", features = ["full"] }
-tokio-stream = { version = "0.1", features = ["net"] }
-futures = "0.3"
 byteorder = "1"
-log = "0.4"
-env_logger = "0.9"
 clap = { version = "3", features = ["color", "cargo", "env"] }
-permit = "0.1.4"
-toml = "0.5"
-serde = { version = "1", features = ["derive"] }
+env_logger = "0.9"
+futures-core = "0.3"
+futures-util = { version = "0.3", default_features = false, features=["std"] }
 ip_network = { version = "0.3", features = ["serde"] }
+log = "0.4"
+permit = "0.1.4"
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 syslog = "6"
 thiserror = "1"
+tokio = { version = "^1.5", features = ["rt-multi-thread", "net", "time", "macros", "sync", "io-util", "signal"] }
+tokio-stream = { version = "0.1", features = ["net"] }
+toml = "0.5"
 
 [dev-dependencies]
 hex-literal = "0.3"

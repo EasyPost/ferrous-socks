@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use clap::Arg;
-use futures::future::FutureExt;
+use futures_util::future::FutureExt;
 use log::{debug, info, warn};
 use tokio::signal::unix::{signal, SignalKind};
 
@@ -67,7 +67,7 @@ fn cli() -> clap::App<'static> {
 
 async fn any_shutdown_signal() {
     debug!("Will shut down on HUP, QUIT, INT, or TERM");
-    futures::future::select_all(
+    futures_util::future::select_all(
         vec![
             signal(SignalKind::hangup()).unwrap().recv().boxed(),
             signal(SignalKind::quit()).unwrap().recv().boxed(),

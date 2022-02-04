@@ -4,7 +4,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::stream::{Stream, StreamExt};
+use futures_core::stream::Stream;
+use futures_util::stream::StreamExt;
 use log::{debug, warn};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -84,7 +85,7 @@ impl StatsServer {
     {
         let stats = self.stats;
         let permit_listen = self.permit.new_sub();
-        futures::future::select(
+        futures_util::future::select(
             self.permit,
             stream
                 .take_until(permit_listen)

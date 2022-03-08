@@ -19,8 +19,8 @@ mod util;
 
 use config::Config;
 
-fn cli() -> clap::App<'static> {
-    clap::App::new(clap::crate_name!())
+fn cli() -> clap::Command<'static> {
+    clap::Command::new(clap::crate_name!())
         .version(clap::crate_version!())
         .author(clap::crate_authors!())
         .about(clap::crate_description!())
@@ -47,7 +47,7 @@ fn cli() -> clap::App<'static> {
                 .takes_value(true)
                 .help("Dump out config (with all defaults interpolated) to the given path (- meaning stdout)"),
         )
-        .help_heading("LOGGING OPTIONS")
+        .next_help_heading("LOGGING OPTIONS")
         .arg(
             Arg::new("log_level")
                 .short('L')

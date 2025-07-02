@@ -1,14 +1,14 @@
-use std::env;
 use std::sync::Arc;
 
 use anyhow::Context;
-use clap::Arg;
+use clap::Parser;
 use futures_util::future::FutureExt;
 use log::{debug, info, warn};
 use tokio::signal::unix::{signal, SignalKind};
 
 mod acl;
 mod config;
+mod cli;
 mod proxy;
 mod reply;
 mod request;
@@ -18,52 +18,6 @@ mod stats_socket;
 mod util;
 
 use config::Config;
-
-fn cli() -> clap::Command<'static> {
-    clap::Command::new(clap::crate_name!())
-        .version(clap::crate_version!())
-        .author(clap::crate_authors!())
-        .about(clap::crate_description!())
-        .arg(
-            Arg::new("config")
-                .short('c')
-                .long("config")
-                .value_name("PATH")
-                .help("Path to configuration TOML file")
-                .takes_value(true)
-                .required_unless_present("dump-config"),
-        )
-        .arg(
-            Arg::new("check-config")
-                .short('C')
-                .long("check-config")
-                .help("Only check config syntax and exit")
-                .conflicts_with("dump-config")
-        )
-        .arg(
-            Arg::new("dump-config")
-                .long("dump-config")
-                .value_name("PATH")
-                .takes_value(true)
-                .help("Dump out config (with all defaults interpolated) to the given path (- meaning stdout)"),
-        )
-        .next_help_heading("LOGGING OPTIONS")
-        .arg(
-            Arg::new("log_level")
-                .short('L')
-                .long("log-level")
-                .takes_value(true)
-                .default_value("warn")
-                .possible_values(&["error", "warn", "info", "debug", "trace"])
-                .help("Log level (only used if log level not set for syslog in config)"),
-        )
-        .arg(
-            Arg::new("stderr")
-                .short('E')
-                .long("stderr")
-                .help("Force logging to stderr"),
-        )
-}
 
 async fn any_shutdown_signal() {
     debug!("Will shut down on HUP, QUIT, INT, or TERM");
@@ -81,15 +35,15 @@ async fn any_shutdown_signal() {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let matches = cli().get_matches();
+    let cli = cli::Cli::parse();
 
-    let conf = if let Some(config_path) = matches.value_of("config") {
+    let conf = if let Some(ref config_path) = cli.config_path {
         Config::from_path(config_path)?
     } else {
         Config::default()
     };
 
-    if let Some(dump_path) = matches.value_of("dump-config") {
+    if let Some(ref dump_path) = cli.dump_config {
         let dump_path = if dump_path == "-" {
             None
         } else {
@@ -104,12 +58,12 @@ async fn main() -> anyhow::Result<()> {
 
     let conf = Arc::new(conf);
 
-    if matches.is_present("check-config") {
+    if cli.check_config {
         println!("Config loaded successfully");
         return Ok(());
     }
 
-    conf.initialize_logging(&matches);
+    conf.initialize_logging(&cli.logging);
 
     let stats = Arc::new(stats::Stats::new());
 
@@ -164,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
     any_shutdown_signal().await;
     info!("got shutdown signal; attempting graceful shutdown");
     let shutdown_start = std::time::Instant::now();
-    match p.revoke().try_wait_for(conf.shutdown_timeout) {
+    match p.revoke().wait_subs_timeout(conf.shutdown_timeout) {
         Ok(_) => debug!("shutdown finished in {:?}", shutdown_start.elapsed()),
         Err(e) => warn!(
             "shutdown timed out after {:?}: {:?}",
@@ -173,14 +127,4 @@ async fn main() -> anyhow::Result<()> {
         ),
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::cli;
-
-    #[test]
-    fn test_debug_assert_cli() {
-        cli().debug_assert();
-    }
 }

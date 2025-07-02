@@ -242,9 +242,9 @@ impl RawConfig {
     }
 
     fn dump_to<W: std::io::Write>(&self, f: W) -> anyhow::Result<()> {
-        let v = toml::ser::to_vec(self)?;
+        let v = toml::ser::to_string(self)?;
         let mut b = std::io::BufWriter::new(f);
-        b.write_all(&v)?;
+        b.write_all(v.as_bytes())?;
         Ok(())
     }
 
@@ -338,17 +338,12 @@ impl Config {
         self.into_raw().dump(path)
     }
 
-    pub fn initialize_logging(&self, matches: &clap::ArgMatches) {
-        let level: log::LevelFilter = matches
-            .value_of_t_or_exit::<String>("log_level")
-            .parse()
-            .expect("Invalid --log-level");
-        // this is gross but semantically equivalnet to the illegal `if let Some(ref c) = self.syslog_config && !matches.is_present("stderr")`
-        if let Some(c) = (!matches.is_present("stderr"))
-            .then(|| self.syslog_config.as_ref())
-            .flatten()
-        {
-            c.initialize_logging(level)
+    pub fn initialize_logging(&self, cli: &crate::cli::LoggingCli) {
+        let level: log::LevelFilter = cli.log_level.into();
+        if cli.stderr && self.syslog_config.is_some() {
+            self.syslog_config
+                .as_ref()
+                .map(|c| c.initialize_logging(level));
         } else {
             env_logger::Builder::new()
                 .filter_level(level)

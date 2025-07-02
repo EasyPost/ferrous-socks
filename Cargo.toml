@@ -13,19 +13,19 @@ repository = "https://github.com/EasyPost/ferrous-socks"
 anyhow = "1.0"
 byteorder = "1"
 clap = { version = "3", features = ["color", "cargo", "env"] }
-env_logger = "0.9"
+env_logger = "0.11"
 futures-core = "0.3"
-futures-util = { version = "0.3", default_features = false, features=["std"] }
-ip_network = { version = "0.3", features = ["serde"] }
+futures-util = { version = "0.3", default-features = false, features=["std"] }
+ip_network = { version = "0.4", features = ["serde"] }
 log = "0.4"
-permit = "0.1.4"
+permit = "0.2.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-syslog = "6"
-thiserror = "1"
+syslog = "7"
+thiserror = "2"
 tokio = { version = "^1.5", features = ["rt-multi-thread", "net", "time", "macros", "sync", "io-util", "signal"] }
 tokio-stream = { version = "0.1", features = ["net"] }
-toml = "0.5"
+toml = "0.8"
 
 [dev-dependencies]
-hex-literal = "0.3"
+hex-literal = "1.0"

@@ -164,7 +164,7 @@ async fn main() -> anyhow::Result<()> {
     any_shutdown_signal().await;
     info!("got shutdown signal; attempting graceful shutdown");
     let shutdown_start = std::time::Instant::now();
-    match p.revoke().try_wait_for(conf.shutdown_timeout) {
+    match p.revoke().wait_subs_timeout(conf.shutdown_timeout) {
         Ok(_) => debug!("shutdown finished in {:?}", shutdown_start.elapsed()),
         Err(e) => warn!(
             "shutdown timed out after {:?}: {:?}",

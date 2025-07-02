@@ -242,9 +242,9 @@ impl RawConfig {
     }
 
     fn dump_to<W: std::io::Write>(&self, f: W) -> anyhow::Result<()> {
-        let v = toml::ser::to_vec(self)?;
+        let v = toml::ser::to_string(self)?;
         let mut b = std::io::BufWriter::new(f);
-        b.write_all(&v)?;
+        b.write_all(v.as_bytes())?;
         Ok(())
     }
 

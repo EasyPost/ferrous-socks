@@ -57,7 +57,7 @@ impl Acl {
                 .unwrap_or(true);
             let port_match = rule.destination_port.map(|p| p == dport).unwrap_or(true);
             let username_match = match (username, rule.username.as_ref()) {
-                (Some(found), Some(expected)) => (found == expected),
+                (Some(found), Some(expected)) => found == expected,
                 (Some(_found), None) => true,
                 (None, Some(_)) => false,
                 (None, None) => true,
